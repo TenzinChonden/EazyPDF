@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f8fafc;
+  color: #111827;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.rich-text-editor:empty::before {
+  content: attr(data-placeholder);
+  color: #6b7280;
+  pointer-events: none;
+}
