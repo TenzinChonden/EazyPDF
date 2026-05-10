@@ -13,6 +13,8 @@ import type {
   PageRef,
   PageRotation,
   PageViewportSize,
+  ShapeAnnotation,
+  ShapeKind,
   SourceDocument,
   TextAnnotation
 } from "@/types/editor";
@@ -45,7 +47,13 @@ type EditorSessionContextValue = {
       | "italic"
     >
   ) => string;
+  addShapeAnnotation: (
+    annotation: Pick<ShapeAnnotation, "pageId" | "x" | "y"> & {
+      kind: ShapeKind;
+    }
+  ) => string;
   updateTextAnnotation: (id: string, patch: Partial<TextAnnotation>) => void;
+  updateShapeAnnotation: (id: string, patch: Partial<ShapeAnnotation>) => void;
   deleteTextAnnotation: (id: string) => void;
   selectAnnotation: (id: string | null) => void;
   clearAutoFocusAnnotation: () => void;
@@ -166,7 +174,53 @@ export function EditorSessionProvider({
       touch((current) => ({
         ...current,
         annotations: current.annotations.map((annotation) =>
-          annotation.id === id ? { ...annotation, ...patch } : annotation
+          annotation.id === id && annotation.type === "text"
+            ? { ...annotation, ...patch }
+            : annotation
+        )
+      }));
+    },
+    [touch]
+  );
+
+  const addShapeAnnotation: EditorSessionContextValue["addShapeAnnotation"] =
+    useCallback(
+      (annotation) => {
+        const id = createId();
+        const defaultSize = annotation.kind === "circle" ? 100 : 80;
+        touch((current) => ({
+          ...current,
+          annotations: [
+            ...current.annotations,
+            {
+              id,
+              type: "shape",
+              pageId: annotation.pageId,
+              kind: annotation.kind,
+              x: annotation.x,
+              y: annotation.y,
+              width: defaultSize,
+              height: defaultSize,
+              strokeColor: "#111827",
+              strokeWidth: 3,
+              opacity: 1,
+            }
+          ]
+        }));
+        setSelectedAnnotationId(id);
+        return id;
+      },
+      [touch]
+    );
+
+  const updateShapeAnnotation = useCallback(
+    (id: string, patch: Partial<ShapeAnnotation>) => {
+      touch((current) => ({
+        ...current,
+        annotations: current.annotations.map((annotation) =>
+          annotation.id === id && annotation.type === "shape"
+            ? { ...annotation, ...patch }
+            : annotation
         )
       }));
     },
@@ -336,7 +390,9 @@ export function EditorSessionProvider({
             y: annotation.y * ratio,
             width: annotation.width * ratio,
             height: annotation.height * ratio,
-            defaultFontSize: annotation.defaultFontSize * ratio
+            ...(annotation.type === "text"
+              ? { defaultFontSize: annotation.defaultFontSize * ratio }
+              : { strokeWidth: annotation.strokeWidth * ratio })
           }))
         };
       });
@@ -376,7 +432,9 @@ export function EditorSessionProvider({
       createSession,
       clearSession,
       addTextAnnotation,
+      addShapeAnnotation,
       updateTextAnnotation,
+      updateShapeAnnotation,
       deleteTextAnnotation,
       selectAnnotation,
       clearAutoFocusAnnotation,
@@ -399,7 +457,9 @@ export function EditorSessionProvider({
       createSession,
       clearSession,
       addTextAnnotation,
+      addShapeAnnotation,
       updateTextAnnotation,
+      updateShapeAnnotation,
       deleteTextAnnotation,
       selectAnnotation,
       clearAutoFocusAnnotation,

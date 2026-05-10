@@ -1,6 +1,12 @@
 import { degrees, PDFDocument, type PDFFont, rgb, StandardFonts } from "pdf-lib";
 import { stripHtml } from "@/lib/richText/html";
-import type { EditorSession, PageRef, TextAnnotation, TextFontFamily } from "@/types/editor";
+import type {
+  EditorSession,
+  PageRef,
+  ShapeAnnotation,
+  TextAnnotation,
+  TextFontFamily
+} from "@/types/editor";
 
 type TextRun = {
   text: string;
@@ -16,6 +22,65 @@ function safeFileName(fileName: string): string {
   return fileName.trim() || "document.pdf";
 }
 
+export function hasAnnotationChanges(session: EditorSession): boolean {
+  return session.annotations.length > 0;
+}
+
+export function hasCombinedDocuments(session: EditorSession): boolean {
+  return session.documents.length > 1;
+}
+
+export function hasDeletedPages(session: EditorSession): boolean {
+  const originalPageCount = session.documents.reduce(
+    (total, document) => total + document.pageCount,
+    0
+  );
+  return session.pageOrder.length !== originalPageCount;
+}
+
+export function hasRotationChanges(session: EditorSession): boolean {
+  return session.pageOrder.some((page) => page.rotation !== 0);
+}
+
+export function hasPageOrderChanges(session: EditorSession): boolean {
+  if (session.documents.length !== 1) {
+    return false;
+  }
+
+  const document = session.documents[0];
+
+  if (session.pageOrder.length !== document.pageCount) {
+    return true;
+  }
+
+  return session.pageOrder.some(
+    (page, index) =>
+      page.sourceDocumentId !== document.id || page.sourcePageIndex !== index
+  );
+}
+
+export function hasUserChanges(session: EditorSession): boolean {
+  return (
+    hasAnnotationChanges(session) ||
+    hasCombinedDocuments(session) ||
+    hasDeletedPages(session) ||
+    hasRotationChanges(session) ||
+    hasPageOrderChanges(session)
+  );
+}
+
+function logExportPath(path: string, session: EditorSession): void {
+  if (process.env.NODE_ENV !== "development") {
+    return;
+  }
+
+  console.info(`EazyPDF export: ${path}`, {
+    sourceDocuments: session.documents.length,
+    exportedPages: session.pageOrder.length,
+    annotations: session.annotations.length
+  });
+}
+
 export async function exportEditedPdf(session: EditorSession): Promise<Blob> {
   return generateEditedPdfBlob(session);
 }
@@ -23,14 +88,25 @@ export async function exportEditedPdf(session: EditorSession): Promise<Blob> {
 export async function generateEditedPdfBlob(
   session: EditorSession
 ): Promise<Blob> {
-  if (process.env.NODE_ENV === "development") {
-    console.info("EazyPDF export", {
-      sourceDocuments: session.documents.length,
-      exportedPages: session.pageOrder.length,
-      annotations: session.annotations.length
+  if (!hasUserChanges(session)) {
+    logExportPath("no-op original export", session);
+    const sourceDocument = session.documents[0];
+    return new Blob([sourceDocument.pdfBytes.slice(0)], {
+      type: "application/pdf"
     });
   }
 
+  logExportPath(
+    hasCombinedDocuments(session)
+      ? "combined PDF export"
+      : hasAnnotationChanges(session)
+        ? "copy-pages + annotations export"
+        : "copy-pages export",
+    session
+  );
+
+  // Changed exports copy original PDF pages directly. We never export rendered
+  // canvases or rasterize page content, preserving normal source PDF fidelity.
   const outputPdf = await PDFDocument.create();
   const fontCache = new Map<StandardFonts, PDFFont>();
   const sourcePdfCache = new Map<string, PDFDocument>();
@@ -47,7 +123,6 @@ export async function generateEditedPdfBlob(
     const sourcePdf =
       sourcePdfCache.get(sourceDocument.id) ??
       (await PDFDocument.load(sourceDocument.pdfBytes.slice(0)));
-    flattenFormAppearances(sourcePdf);
     sourcePdfCache.set(sourceDocument.id, sourcePdf);
 
     const [copiedPage] = await outputPdf.copyPages(sourcePdf, [
@@ -62,14 +137,23 @@ export async function generateEditedPdfBlob(
     );
 
     for (const annotation of pageAnnotations) {
-      await drawTextAnnotation(
-        annotation,
-        copiedPage,
-        pageRef,
-        session,
-        fontCache,
-        outputPdf
-      );
+      if (annotation.type === "text") {
+        await drawTextAnnotation(
+          annotation,
+          copiedPage,
+          pageRef,
+          session,
+          fontCache,
+          outputPdf
+        );
+      } else if (annotation.type === "shape") {
+        drawShapeAnnotation(
+          annotation,
+          copiedPage,
+          pageRef,
+          session
+        );
+      }
     }
   }
 
@@ -79,19 +163,87 @@ export async function generateEditedPdfBlob(
   return new Blob([pdfBuffer], { type: "application/pdf" });
 }
 
-function flattenFormAppearances(sourcePdf: PDFDocument): void {
-  try {
-    const form = sourcePdf.getForm();
-    const fields = form.getFields();
+function drawShapeAnnotation(
+  annotation: ShapeAnnotation,
+  pdfPage: ReturnType<PDFDocument["getPages"]>[number],
+  pageRef: PageRef,
+  session: EditorSession
+): void {
+  const renderedSize = session.pageViewports[annotation.pageId];
 
-    if (fields.length > 0) {
-      form.flatten();
-    }
-  } catch {
-    // Some PDFs contain XFA, unusual widgets, optional content, or broken form
-    // structures. Normal page content is still copied directly below; flattening
-    // is best-effort so unsupported forms never block export.
+  if (!renderedSize) {
+    return;
   }
+
+  const { width: pdfPageWidth, height: pdfPageHeight } = pdfPage.getSize();
+  const scaleX = pdfPageWidth / renderedSize.width;
+  const scaleY = pdfPageHeight / renderedSize.height;
+  const pdfX = annotation.x * scaleX;
+  const pdfY = pdfPageHeight - (annotation.y + annotation.height) * scaleY;
+  const width = annotation.width * scaleX;
+  const height = annotation.height * scaleY;
+  const strokeColor = hexToRgb(annotation.strokeColor);
+  const strokeWidth = annotation.strokeWidth * Math.min(scaleX, scaleY);
+
+  // Shape coordinates are stored in rendered browser page coordinates. Rotated
+  // page coordinate remapping remains intentionally simple for this MVP.
+  void pageRef;
+
+  if (annotation.kind === "check") {
+    const a = { x: pdfX + width * 0.18, y: pdfY + height * 0.45 };
+    const b = { x: pdfX + width * 0.4, y: pdfY + height * 0.24 };
+    const c = { x: pdfX + width * 0.84, y: pdfY + height * 0.76 };
+    drawLine(pdfPage, a, b, strokeColor, strokeWidth, annotation.opacity);
+    drawLine(pdfPage, b, c, strokeColor, strokeWidth, annotation.opacity);
+    return;
+  }
+
+  if (annotation.kind === "cross") {
+    drawLine(
+      pdfPage,
+      { x: pdfX + width * 0.22, y: pdfY + height * 0.22 },
+      { x: pdfX + width * 0.78, y: pdfY + height * 0.78 },
+      strokeColor,
+      strokeWidth,
+      annotation.opacity
+    );
+    drawLine(
+      pdfPage,
+      { x: pdfX + width * 0.78, y: pdfY + height * 0.22 },
+      { x: pdfX + width * 0.22, y: pdfY + height * 0.78 },
+      strokeColor,
+      strokeWidth,
+      annotation.opacity
+    );
+    return;
+  }
+
+  pdfPage.drawEllipse({
+    x: pdfX + width / 2,
+    y: pdfY + height / 2,
+    xScale: width / 2,
+    yScale: height / 2,
+    borderColor: rgb(strokeColor.r, strokeColor.g, strokeColor.b),
+    borderWidth: strokeWidth,
+    borderOpacity: annotation.opacity
+  });
+}
+
+function drawLine(
+  pdfPage: ReturnType<PDFDocument["getPages"]>[number],
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  color: { r: number; g: number; b: number },
+  thickness: number,
+  opacity: number
+): void {
+  pdfPage.drawLine({
+    start,
+    end,
+    thickness,
+    color: rgb(color.r, color.g, color.b),
+    opacity
+  });
 }
 
 async function drawTextAnnotation(

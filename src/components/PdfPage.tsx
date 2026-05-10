@@ -2,33 +2,42 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+import { ShapeAnnotationBox } from "@/components/ShapeAnnotationBox";
 import { TextAnnotationBox } from "@/components/TextAnnotationBox";
 import { useEditorSession } from "@/context/EditorSessionContext";
-import type { EditorTool, PageRef, PageViewportSize } from "@/types/editor";
+import type {
+  EditorTool,
+  PageRef,
+  PageViewportSize,
+  ShapeKind
+} from "@/types/editor";
 
 type PdfPageProps = {
   activeTool: EditorTool;
+  activeShapeKind: ShapeKind;
   displayPageNumber: number;
   pageRef: PageRef;
   pdfDocument: PDFDocumentProxy;
   scale: number;
   onPageRef: (element: HTMLDivElement | null) => void;
-  onTextCreated: () => void;
+  onAnnotationCreated: () => void;
 };
 
 export function PdfPage({
   activeTool,
+  activeShapeKind,
   displayPageNumber,
   pageRef,
   pdfDocument,
   scale,
   onPageRef,
-  onTextCreated
+  onAnnotationCreated
 }: PdfPageProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
   const {
     session,
+    addShapeAnnotation,
     addTextAnnotation,
     selectAnnotation,
     setPageViewport,
@@ -105,7 +114,7 @@ export function PdfPage({
           height: pageSize?.height
         }}
         onClick={(event) => {
-          if (activeTool !== "text") {
+          if (activeTool === "select") {
             selectAnnotation(null);
             return;
           }
@@ -115,15 +124,28 @@ export function PdfPage({
           }
 
           const rect = pageContainerRef.current.getBoundingClientRect();
-          addTextAnnotation({
-            pageId: pageRef.id,
-            x: event.clientX - rect.left,
-            y: event.clientY - rect.top,
-            width: 160,
-            height: 48
-          });
+          const x = event.clientX - rect.left;
+          const y = event.clientY - rect.top;
+
+          if (activeTool === "text") {
+            addTextAnnotation({
+              pageId: pageRef.id,
+              x,
+              y,
+              width: 160,
+              height: 48
+            });
+          } else if (activeTool === "shape") {
+            addShapeAnnotation({
+              pageId: pageRef.id,
+              kind: activeShapeKind,
+              x,
+              y
+            });
+          }
+
           setCurrentPage(pageRef.id);
-          onTextCreated();
+          onAnnotationCreated();
         }}
       >
         <canvas ref={canvasRef} className="block" />
@@ -132,13 +154,17 @@ export function PdfPage({
             Rendering page...
           </div>
         ) : null}
-        {pageAnnotations.map((annotation) => (
-          <TextAnnotationBox
-            key={annotation.id}
-            activeTool={activeTool}
-            annotation={annotation}
-          />
-        ))}
+        {pageAnnotations.map((annotation) =>
+          annotation.type === "text" ? (
+            <TextAnnotationBox
+              key={annotation.id}
+              activeTool={activeTool}
+              annotation={annotation}
+            />
+          ) : (
+            <ShapeAnnotationBox key={annotation.id} annotation={annotation} />
+          )
+        )}
       </div>
     </div>
   );

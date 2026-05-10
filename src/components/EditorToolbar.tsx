@@ -7,6 +7,9 @@ import {
   RotateCcw,
   RotateCw,
   FileX,
+  Check,
+  Circle,
+  X,
   Trash2,
   Type,
   ZoomIn,
@@ -16,6 +19,7 @@ import { useEditorSession } from "@/context/EditorSessionContext";
 import { applyInlineStyleToSelection } from "@/lib/richText/html";
 import type {
   EditorTool,
+  ShapeKind,
   TextBackgroundColor,
   TextFontFamily
 } from "@/types/editor";
@@ -23,6 +27,7 @@ import type {
 type EditorToolbarProps = {
   activeTool: EditorTool;
   onToolChange: (tool: EditorTool) => void;
+  onShapeSelect: (kind: ShapeKind) => void;
 };
 
 const FONT_OPTIONS: TextFontFamily[] = [
@@ -63,13 +68,15 @@ const BACKGROUND_COLORS: Array<{
 
 export function EditorToolbar({
   activeTool,
-  onToolChange
+  onToolChange,
+  onShapeSelect
 }: EditorToolbarProps): JSX.Element {
   const {
     session,
     selectedAnnotationId,
     selectedPageIds,
     updateTextAnnotation,
+    updateShapeAnnotation,
     deleteTextAnnotation,
     deletePages,
     rotatePages,
@@ -79,18 +86,22 @@ export function EditorToolbar({
   const selectedAnnotation = session?.annotations.find(
     (annotation) => annotation.id === selectedAnnotationId
   );
+  const selectedTextAnnotation =
+    selectedAnnotation?.type === "text" ? selectedAnnotation : null;
+  const selectedShapeAnnotation =
+    selectedAnnotation?.type === "shape" ? selectedAnnotation : null;
   const pageDeleteCount = selectedPageIds.length;
   const deletePageLabel = pageDeleteCount > 0 ? "Delete Selected" : "Delete Page";
   const applyInlineStyle = (
     patch: Parameters<typeof applyInlineStyleToSelection>[1]
   ) => {
-    if (!selectedAnnotation) {
+    if (!selectedTextAnnotation) {
       return;
     }
 
     updateTextAnnotation(
-      selectedAnnotation.id,
-      applyInlineStyleToSelection(selectedAnnotation, patch)
+      selectedTextAnnotation.id,
+      applyInlineStyleToSelection(selectedTextAnnotation, patch)
     );
   };
 
@@ -115,6 +126,33 @@ export function EditorToolbar({
       >
         <Type aria-hidden="true" size={17} />
         <span>Text</span>
+      </button>
+      <button
+        className={toolButtonClass(activeTool === "shape")}
+        type="button"
+        title="Check"
+        onClick={() => onShapeSelect("check")}
+      >
+        <Check aria-hidden="true" size={17} />
+        <span>Check</span>
+      </button>
+      <button
+        className={toolButtonClass(activeTool === "shape")}
+        type="button"
+        title="Cross"
+        onClick={() => onShapeSelect("cross")}
+      >
+        <X aria-hidden="true" size={17} />
+        <span>Cross</span>
+      </button>
+      <button
+        className={toolButtonClass(activeTool === "shape")}
+        type="button"
+        title="Circle"
+        onClick={() => onShapeSelect("circle")}
+      >
+        <Circle aria-hidden="true" size={17} />
+        <span>Circle</span>
       </button>
       <div className="mx-2 h-6 w-px bg-slate-200" />
       <button
@@ -188,13 +226,13 @@ export function EditorToolbar({
         <FileX aria-hidden="true" size={17} />
         <span>{deletePageLabel}</span>
       </button>
-      {selectedAnnotation ? (
+      {selectedTextAnnotation ? (
         <>
           <div className="mx-2 h-6 w-px bg-slate-200" />
           <select
             className={`${fieldClass} max-w-36`}
             aria-label="Font family"
-            value={selectedAnnotation.defaultFontFamily}
+            value={selectedTextAnnotation.defaultFontFamily}
             onChange={(event) =>
               applyInlineStyle({
                 fontFamily: event.target.value as TextFontFamily
@@ -213,7 +251,7 @@ export function EditorToolbar({
             type="number"
             min={8}
             max={96}
-            value={Math.round(selectedAnnotation.defaultFontSize)}
+            value={Math.round(selectedTextAnnotation.defaultFontSize)}
             onChange={(event) =>
               applyInlineStyle({
                 fontSize: Number(event.target.value) || 16
@@ -221,28 +259,28 @@ export function EditorToolbar({
             }
           />
           <button
-            className={toolButtonClass(selectedAnnotation.bold)}
+            className={toolButtonClass(selectedTextAnnotation.bold)}
             type="button"
             title="Bold"
-            aria-pressed={selectedAnnotation.bold}
+            aria-pressed={selectedTextAnnotation.bold}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() =>
               applyInlineStyle({
-                bold: !selectedAnnotation.bold
+                bold: !selectedTextAnnotation.bold
               })
             }
           >
             <Bold aria-hidden="true" size={17} />
           </button>
           <button
-            className={toolButtonClass(selectedAnnotation.italic)}
+            className={toolButtonClass(selectedTextAnnotation.italic)}
             type="button"
             title="Italic"
-            aria-pressed={selectedAnnotation.italic}
+            aria-pressed={selectedTextAnnotation.italic}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() =>
               applyInlineStyle({
-                italic: !selectedAnnotation.italic
+                italic: !selectedTextAnnotation.italic
               })
             }
           >
@@ -255,7 +293,7 @@ export function EditorToolbar({
                 key={color.value}
                 className={[
                   "h-5 w-5 rounded-full border transition",
-                  selectedAnnotation.defaultColor.toUpperCase() === color.value
+                  selectedTextAnnotation.defaultColor.toUpperCase() === color.value
                     ? "border-slate-950 ring-2 ring-slate-300"
                     : "border-slate-300 hover:scale-110"
                 ].join(" ")}
@@ -275,7 +313,7 @@ export function EditorToolbar({
                 key={color.value}
                 className={[
                   "h-5 w-5 rounded border transition",
-                  selectedAnnotation.backgroundColor === color.value
+                  selectedTextAnnotation.backgroundColor === color.value
                     ? "border-slate-950 ring-2 ring-slate-300"
                     : "border-slate-300 hover:scale-110",
                   color.value === "transparent"
@@ -291,7 +329,7 @@ export function EditorToolbar({
                 aria-label={`${color.name} background`}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() =>
-                  updateTextAnnotation(selectedAnnotation.id, {
+                  updateTextAnnotation(selectedTextAnnotation.id, {
                     backgroundColor: color.value,
                     backgroundTransparent: color.value === "transparent"
                   })
@@ -304,7 +342,57 @@ export function EditorToolbar({
             type="button"
             title="Delete text box"
             onMouseDown={(event) => event.preventDefault()}
-            onClick={() => deleteTextAnnotation(selectedAnnotation.id)}
+            onClick={() => deleteTextAnnotation(selectedTextAnnotation.id)}
+          >
+            <Trash2 aria-hidden="true" size={17} />
+            <span>Delete</span>
+          </button>
+        </>
+      ) : null}
+      {selectedShapeAnnotation ? (
+        <>
+          <div className="mx-2 h-6 w-px bg-slate-200" />
+          <input
+            className="h-9 w-16 rounded-md border border-slate-300 px-2 text-sm text-slate-800 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+            aria-label="Shape stroke width"
+            type="number"
+            min={1}
+            max={16}
+            value={Math.round(selectedShapeAnnotation.strokeWidth)}
+            onChange={(event) =>
+              updateShapeAnnotation(selectedShapeAnnotation.id, {
+                strokeWidth: Number(event.target.value) || 3
+              })
+            }
+          />
+          <div className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1">
+            <span className="text-xs font-semibold text-slate-500">Stroke</span>
+            {TEXT_COLORS.map((color) => (
+              <button
+                key={color.value}
+                className={[
+                  "h-5 w-5 rounded-full border transition",
+                  selectedShapeAnnotation.strokeColor.toUpperCase() === color.value
+                    ? "border-slate-950 ring-2 ring-slate-300"
+                    : "border-slate-300 hover:scale-110"
+                ].join(" ")}
+                style={{ backgroundColor: color.value }}
+                type="button"
+                title={color.name}
+                aria-label={`${color.name} shape`}
+                onClick={() =>
+                  updateShapeAnnotation(selectedShapeAnnotation.id, {
+                    strokeColor: color.value
+                  })
+                }
+              />
+            ))}
+          </div>
+          <button
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold text-red-700 transition hover:bg-red-50"
+            type="button"
+            title="Delete shape"
+            onClick={() => deleteTextAnnotation(selectedShapeAnnotation.id)}
           >
             <Trash2 aria-hidden="true" size={17} />
             <span>Delete</span>

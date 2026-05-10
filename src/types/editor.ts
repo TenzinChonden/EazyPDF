@@ -27,7 +27,7 @@ export type PageRef = {
 
 export type PageRotation = 0 | 90 | 180 | 270;
 
-export type Annotation = TextAnnotation;
+export type Annotation = TextAnnotation | ShapeAnnotation;
 
 export type TextAnnotation = {
   id: string;
@@ -66,9 +66,25 @@ export type TextBackgroundColor =
   | "#FEF3C7"
   | "#F3F4F6";
 
+export type ShapeKind = "check" | "cross" | "circle";
+
+export type ShapeAnnotation = {
+  id: string;
+  type: "shape";
+  pageId: string;
+  kind: ShapeKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  strokeColor: string;
+  strokeWidth: number;
+  opacity: number;
+};
+
 export type PageViewportSize = {
   width: number;
   height: number;
 };
 
-export type EditorTool = "select" | "text";
+export type EditorTool = "select" | "text" | "shape";

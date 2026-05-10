@@ -5,22 +5,24 @@ import { getDocument, type PDFDocumentProxy } from "pdfjs-dist";
 import { PdfPage } from "@/components/PdfPage";
 import { useEditorSession } from "@/context/EditorSessionContext";
 import { configurePdfWorker } from "@/lib/pdf/pdfWorker";
-import type { EditorTool } from "@/types/editor";
+import type { EditorTool, ShapeKind } from "@/types/editor";
 
 type PdfDocumentMap = Record<string, PDFDocumentProxy>;
 
 type PdfViewerProps = {
   activeTool: EditorTool;
+  activeShapeKind: ShapeKind;
   onDocumentsReady: (pdfDocuments: PdfDocumentMap) => void;
   onPageRef: (pageId: string, element: HTMLDivElement | null) => void;
-  onTextCreated: () => void;
+  onAnnotationCreated: () => void;
 };
 
 export function PdfViewer({
   activeTool,
+  activeShapeKind,
   onDocumentsReady,
   onPageRef,
-  onTextCreated
+  onAnnotationCreated
 }: PdfViewerProps): JSX.Element {
   const { session, setCurrentPage } = useEditorSession();
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -162,6 +164,7 @@ export function PdfViewer({
             <PdfPage
               key={pageRef.id}
               activeTool={activeTool}
+              activeShapeKind={activeShapeKind}
               displayPageNumber={index + 1}
               pageRef={pageRef}
               pdfDocument={pdfDocument}
@@ -170,7 +173,7 @@ export function PdfViewer({
                 pageElements.current[pageRef.id] = element;
                 onPageRef(pageRef.id, element);
               }}
-              onTextCreated={onTextCreated}
+              onAnnotationCreated={onAnnotationCreated}
             />
           );
         })}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Printer } from "lucide-react";
+import { ChevronDown, Download, Printer } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { EditorToolbar } from "@/components/EditorToolbar";
 import { PageThumbnailSidebar } from "@/components/PageThumbnailSidebar";
@@ -13,8 +13,13 @@ import {
   generateEditedPdfBlob,
   printBlob
 } from "@/lib/pdf/exportPdf";
+import {
+  exportAllPagesAsImagesZip,
+  exportCurrentPageAsImage,
+  type ImageExportFormat
+} from "@/lib/pdf/imageExport";
 import { formatFileSize } from "@/lib/utils/formatFileSize";
-import type { EditorTool } from "@/types/editor";
+import type { EditorTool, ShapeKind } from "@/types/editor";
 
 type PdfDocumentMap = Record<string, PDFDocumentProxy>;
 
@@ -23,8 +28,11 @@ export default function EditorPage(): JSX.Element {
   const { session, addSourceDocument, reorderPages, setCurrentPage } =
     useEditorSession();
   const [tool, setTool] = useState<EditorTool>("select");
+  const [activeShapeKind, setActiveShapeKind] = useState<ShapeKind>("check");
   const [pdfDocuments, setPdfDocuments] = useState<PdfDocumentMap>({});
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false);
+  const [exportProgress, setExportProgress] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -49,6 +57,8 @@ export default function EditorPage(): JSX.Element {
 
   const handleDownload = async () => {
     setIsGeneratingPdf(true);
+    setIsDownloadMenuOpen(false);
+    setExportProgress(null);
     setExportError(null);
 
     try {
@@ -58,11 +68,14 @@ export default function EditorPage(): JSX.Element {
       setExportError("Export failed. Try again after the PDF finishes rendering.");
     } finally {
       setIsGeneratingPdf(false);
+      setExportProgress(null);
     }
   };
 
   const handlePrint = async () => {
     setIsGeneratingPdf(true);
+    setIsDownloadMenuOpen(false);
+    setExportProgress(null);
     setExportError(null);
 
     try {
@@ -72,6 +85,49 @@ export default function EditorPage(): JSX.Element {
       setExportError("Print failed. Try again after the PDF finishes rendering.");
     } finally {
       setIsGeneratingPdf(false);
+      setExportProgress(null);
+    }
+  };
+
+  const handleCurrentPageImageExport = async (format: ImageExportFormat) => {
+    setIsGeneratingPdf(true);
+    setIsDownloadMenuOpen(false);
+    setExportProgress("Rendering current page...");
+    setExportError(null);
+
+    try {
+      await exportCurrentPageAsImage(session, format);
+    } catch {
+      setExportError("Image export failed. Try again after the PDF finishes rendering.");
+    } finally {
+      setIsGeneratingPdf(false);
+      setExportProgress(null);
+    }
+  };
+
+  const handleAllPagesImageExport = async (format: ImageExportFormat) => {
+    if (
+      session.pageOrder.length > 25 &&
+      !window.confirm(
+        `Export ${session.pageOrder.length} pages as images? This may take a while.`
+      )
+    ) {
+      return;
+    }
+
+    setIsGeneratingPdf(true);
+    setIsDownloadMenuOpen(false);
+    setExportError(null);
+
+    try {
+      await exportAllPagesAsImagesZip(session, format, (currentPage, totalPages) => {
+        setExportProgress(`Exporting page ${currentPage} of ${totalPages}...`);
+      });
+    } catch {
+      setExportError("ZIP image export failed. Try again with a smaller document.");
+    } finally {
+      setIsGeneratingPdf(false);
+      setExportProgress(null);
     }
   };
 
@@ -101,15 +157,45 @@ export default function EditorPage(): JSX.Element {
             <Printer aria-hidden="true" size={17} />
             {isGeneratingPdf ? "Preparing..." : "Print"}
           </button>
-          <button
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-            type="button"
-            disabled={isGeneratingPdf}
-            onClick={handleDownload}
-          >
-            <Download aria-hidden="true" size={17} />
-            {isGeneratingPdf ? "Preparing..." : "Download"}
-          </button>
+          <div className="relative">
+            <button
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              type="button"
+              disabled={isGeneratingPdf}
+              onClick={() => setIsDownloadMenuOpen((current) => !current)}
+            >
+              <Download aria-hidden="true" size={17} />
+              {isGeneratingPdf ? "Preparing..." : "Download"}
+              <ChevronDown aria-hidden="true" size={16} />
+            </button>
+            {isDownloadMenuOpen ? (
+              <div className="absolute right-0 z-30 mt-2 w-64 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                <DownloadMenuItem onClick={handleDownload}>
+                  Download as PDF
+                </DownloadMenuItem>
+                <DownloadMenuItem
+                  onClick={() => void handleCurrentPageImageExport("png")}
+                >
+                  Download current page as PNG
+                </DownloadMenuItem>
+                <DownloadMenuItem
+                  onClick={() => void handleCurrentPageImageExport("jpeg")}
+                >
+                  Download current page as JPEG
+                </DownloadMenuItem>
+                <DownloadMenuItem
+                  onClick={() => void handleAllPagesImageExport("png")}
+                >
+                  Download all pages as PNG ZIP
+                </DownloadMenuItem>
+                <DownloadMenuItem
+                  onClick={() => void handleAllPagesImageExport("jpeg")}
+                >
+                  Download all pages as JPEG ZIP
+                </DownloadMenuItem>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -130,22 +216,53 @@ export default function EditorPage(): JSX.Element {
         />
 
         <section className="relative flex min-w-0 flex-1 flex-col">
-          <EditorToolbar activeTool={tool} onToolChange={setTool} />
+          <EditorToolbar
+            activeTool={tool}
+            onToolChange={setTool}
+            onShapeSelect={(kind) => {
+              setActiveShapeKind(kind);
+              setTool("shape");
+            }}
+          />
           {exportError ? (
             <div className="mx-4 mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-red-700 ring-1 ring-red-100">
               {exportError}
             </div>
           ) : null}
+          {exportProgress ? (
+            <div className="mx-4 mt-3 rounded-md bg-teal-50 px-3 py-2 text-sm font-medium text-teal-800 ring-1 ring-teal-100">
+              {exportProgress}
+            </div>
+          ) : null}
           <PdfViewer
             activeTool={tool}
+            activeShapeKind={activeShapeKind}
             onDocumentsReady={setPdfDocuments}
             onPageRef={(pageId, element) => {
               pageRefs.current[pageId] = element;
             }}
-            onTextCreated={() => setTool("select")}
+            onAnnotationCreated={() => setTool("select")}
           />
         </section>
       </div>
     </main>
+  );
+}
+
+function DownloadMenuItem({
+  children,
+  onClick
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button
+      className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
+      type="button"
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }
