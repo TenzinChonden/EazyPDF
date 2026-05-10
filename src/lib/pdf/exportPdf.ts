@@ -17,6 +17,20 @@ function safeFileName(fileName: string): string {
 }
 
 export async function exportEditedPdf(session: EditorSession): Promise<Blob> {
+  return generateEditedPdfBlob(session);
+}
+
+export async function generateEditedPdfBlob(
+  session: EditorSession
+): Promise<Blob> {
+  if (process.env.NODE_ENV === "development") {
+    console.info("EazyPDF export", {
+      sourceDocuments: session.documents.length,
+      exportedPages: session.pageOrder.length,
+      annotations: session.annotations.length
+    });
+  }
+
   const outputPdf = await PDFDocument.create();
   const fontCache = new Map<StandardFonts, PDFFont>();
   const sourcePdfCache = new Map<string, PDFDocument>();
@@ -33,12 +47,14 @@ export async function exportEditedPdf(session: EditorSession): Promise<Blob> {
     const sourcePdf =
       sourcePdfCache.get(sourceDocument.id) ??
       (await PDFDocument.load(sourceDocument.pdfBytes.slice(0)));
+    flattenFormAppearances(sourcePdf);
     sourcePdfCache.set(sourceDocument.id, sourcePdf);
 
     const [copiedPage] = await outputPdf.copyPages(sourcePdf, [
       pageRef.sourcePageIndex
     ]);
-    copiedPage.setRotation(degrees(pageRef.rotation));
+    const originalRotation = copiedPage.getRotation().angle;
+    copiedPage.setRotation(degrees((originalRotation + pageRef.rotation) % 360));
     outputPdf.addPage(copiedPage);
 
     const pageAnnotations = session.annotations.filter(
@@ -61,6 +77,21 @@ export async function exportEditedPdf(session: EditorSession): Promise<Blob> {
   const pdfBuffer = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(pdfBuffer).set(bytes);
   return new Blob([pdfBuffer], { type: "application/pdf" });
+}
+
+function flattenFormAppearances(sourcePdf: PDFDocument): void {
+  try {
+    const form = sourcePdf.getForm();
+    const fields = form.getFields();
+
+    if (fields.length > 0) {
+      form.flatten();
+    }
+  } catch {
+    // Some PDFs contain XFA, unusual widgets, optional content, or broken form
+    // structures. Normal page content is still copied directly below; flattening
+    // is best-effort so unsupported forms never block export.
+  }
 }
 
 async function drawTextAnnotation(
@@ -343,4 +374,27 @@ export function downloadBlob(blob: Blob, originalFileName: string): void {
   link.click();
   link.remove();
   URL.revokeObjectURL(objectUrl);
+}
+
+export function printBlob(blob: Blob): void {
+  const objectUrl = URL.createObjectURL(blob);
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.src = objectUrl;
+
+  iframe.onload = () => {
+    iframe.contentWindow?.focus();
+    iframe.contentWindow?.print();
+    window.setTimeout(() => {
+      iframe.remove();
+      URL.revokeObjectURL(objectUrl);
+    }, 1000);
+  };
+
+  document.body.appendChild(iframe);
 }

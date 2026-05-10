@@ -6,6 +6,7 @@ import {
   MousePointer2,
   RotateCcw,
   RotateCw,
+  FileX,
   Trash2,
   Type,
   ZoomIn,
@@ -67,8 +68,10 @@ export function EditorToolbar({
   const {
     session,
     selectedAnnotationId,
+    selectedPageIds,
     updateTextAnnotation,
     deleteTextAnnotation,
+    deletePages,
     rotatePages,
     setScale
   } = useEditorSession();
@@ -76,6 +79,8 @@ export function EditorToolbar({
   const selectedAnnotation = session?.annotations.find(
     (annotation) => annotation.id === selectedAnnotationId
   );
+  const pageDeleteCount = selectedPageIds.length;
+  const deletePageLabel = pageDeleteCount > 0 ? "Delete Selected" : "Delete Page";
   const applyInlineStyle = (
     patch: Parameters<typeof applyInlineStyleToSelection>[1]
   ) => {
@@ -149,6 +154,39 @@ export function EditorToolbar({
       >
         <RotateCw aria-hidden="true" size={17} />
         <span>Rotate Right</span>
+      </button>
+      <button
+        className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold text-red-700 transition hover:bg-red-50"
+        type="button"
+        title={deletePageLabel}
+        onClick={() => {
+          const pageIds =
+            selectedPageIds.length > 0
+              ? selectedPageIds
+              : session?.currentPageId
+                ? [session.currentPageId]
+                : [];
+
+          if (pageIds.length === 0) {
+            return;
+          }
+
+          const confirmed = window.confirm(
+            `Delete ${pageIds.length === 1 ? "this page" : `${pageIds.length} pages`}?`
+          );
+
+          if (!confirmed) {
+            return;
+          }
+
+          const error = deletePages(pageIds);
+          if (error) {
+            window.alert(error);
+          }
+        }}
+      >
+        <FileX aria-hidden="true" size={17} />
+        <span>{deletePageLabel}</span>
       </button>
       {selectedAnnotation ? (
         <>

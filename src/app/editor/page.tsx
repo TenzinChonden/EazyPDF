@@ -2,13 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download } from "lucide-react";
+import { Download, Printer } from "lucide-react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { EditorToolbar } from "@/components/EditorToolbar";
 import { PageThumbnailSidebar } from "@/components/PageThumbnailSidebar";
 import { PdfViewer } from "@/components/PdfViewer";
 import { useEditorSession } from "@/context/EditorSessionContext";
-import { downloadBlob, exportEditedPdf } from "@/lib/pdf/exportPdf";
+import {
+  downloadBlob,
+  generateEditedPdfBlob,
+  printBlob
+} from "@/lib/pdf/exportPdf";
 import { formatFileSize } from "@/lib/utils/formatFileSize";
 import type { EditorTool } from "@/types/editor";
 
@@ -20,7 +24,7 @@ export default function EditorPage(): JSX.Element {
     useEditorSession();
   const [tool, setTool] = useState<EditorTool>("select");
   const [pdfDocuments, setPdfDocuments] = useState<PdfDocumentMap>({});
-  const [isExporting, setIsExporting] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -44,16 +48,30 @@ export default function EditorPage(): JSX.Element {
   );
 
   const handleDownload = async () => {
-    setIsExporting(true);
+    setIsGeneratingPdf(true);
     setExportError(null);
 
     try {
-      const blob = await exportEditedPdf(session);
+      const blob = await generateEditedPdfBlob(session);
       downloadBlob(blob, session.documents[0]?.fileName ?? "combined.pdf");
     } catch {
       setExportError("Export failed. Try again after the PDF finishes rendering.");
     } finally {
-      setIsExporting(false);
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  const handlePrint = async () => {
+    setIsGeneratingPdf(true);
+    setExportError(null);
+
+    try {
+      const blob = await generateEditedPdfBlob(session);
+      printBlob(blob);
+    } catch {
+      setExportError("Print failed. Try again after the PDF finishes rendering.");
+    } finally {
+      setIsGeneratingPdf(false);
     }
   };
 
@@ -73,15 +91,26 @@ export default function EditorPage(): JSX.Element {
             </div>
           </div>
         </div>
-        <button
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-          type="button"
-          disabled={isExporting}
-          onClick={handleDownload}
-        >
-          <Download aria-hidden="true" size={17} />
-          {isExporting ? "Exporting..." : "Download"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+            type="button"
+            disabled={isGeneratingPdf}
+            onClick={handlePrint}
+          >
+            <Printer aria-hidden="true" size={17} />
+            {isGeneratingPdf ? "Preparing..." : "Print"}
+          </button>
+          <button
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            type="button"
+            disabled={isGeneratingPdf}
+            onClick={handleDownload}
+          >
+            <Download aria-hidden="true" size={17} />
+            {isGeneratingPdf ? "Preparing..." : "Download"}
+          </button>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">

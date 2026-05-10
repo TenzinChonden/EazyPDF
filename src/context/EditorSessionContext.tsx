@@ -54,6 +54,7 @@ type EditorSessionContextValue = {
   togglePageSelection: (pageId: string) => void;
   selectAllPages: () => void;
   clearPageSelection: () => void;
+  deletePages: (pageIds: string[]) => string | null;
   rotatePages: (direction: "left" | "right") => void;
   setScale: (scale: number) => void;
   setCurrentPage: (pageId: string) => void;
@@ -244,6 +245,52 @@ export function EditorSessionProvider({
     setSelectedPageIds([]);
   }, []);
 
+  const deletePages = useCallback(
+    (pageIds: string[]) => {
+      if (pageIds.length === 0) {
+        return "No pages selected.";
+      }
+
+      if (!session) {
+        return "No active PDF session.";
+      }
+
+      const pageIdsToDelete = new Set(pageIds);
+
+      if (session.pageOrder.length - pageIdsToDelete.size < 1) {
+        return "You must keep at least one page.";
+      }
+
+      touch((current) => {
+        const nextPageOrder = current.pageOrder.filter(
+          (page) => !pageIdsToDelete.has(page.id)
+        );
+        const currentPageWasDeleted =
+          current.currentPageId !== null && pageIdsToDelete.has(current.currentPageId);
+        const nextCurrentPageId = currentPageWasDeleted
+          ? nextPageOrder[0]?.id ?? null
+          : current.currentPageId;
+
+        return {
+          ...current,
+          pageOrder: nextPageOrder,
+          currentPageId: nextCurrentPageId,
+          annotations: current.annotations.filter(
+            (annotation) => !pageIdsToDelete.has(annotation.pageId)
+          )
+        };
+      });
+
+      setSelectedPageIds((current) =>
+        current.filter((pageId) => !pageIds.includes(pageId))
+      );
+      setSelectedAnnotationId(null);
+
+      return null;
+    },
+    [session, touch]
+  );
+
   const rotatePages = useCallback(
     (direction: "left" | "right") => {
       touch((current) => {
@@ -338,6 +385,7 @@ export function EditorSessionProvider({
       togglePageSelection,
       selectAllPages,
       clearPageSelection,
+      deletePages,
       rotatePages,
       setScale,
       setCurrentPage,
@@ -360,6 +408,7 @@ export function EditorSessionProvider({
       togglePageSelection,
       selectAllPages,
       clearPageSelection,
+      deletePages,
       rotatePages,
       setScale,
       setCurrentPage,
