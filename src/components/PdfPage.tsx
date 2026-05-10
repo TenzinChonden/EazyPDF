@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { ShapeAnnotationBox } from "@/components/ShapeAnnotationBox";
@@ -9,14 +11,16 @@ import type {
   EditorTool,
   PageRef,
   PageViewportSize,
-  ShapeKind
+  ShapeKind,
+  SourceDocument
 } from "@/types/editor";
 
 type PdfPageProps = {
   activeTool: EditorTool;
   displayPageNumber: number;
   pageRef: PageRef;
-  pdfDocument: PDFDocumentProxy;
+  sourceDocument: SourceDocument;
+  pdfDocument?: PDFDocumentProxy;
   scale: number;
   onPageRef: (element: HTMLDivElement | null) => void;
   onAnnotationCreated: () => void;
@@ -26,6 +30,7 @@ export function PdfPage({
   activeTool,
   displayPageNumber,
   pageRef,
+  sourceDocument,
   pdfDocument,
   scale,
   onPageRef,
@@ -50,6 +55,20 @@ export function PdfPage({
 
     async function renderPage() {
       setIsRendering(true);
+
+      if (sourceDocument.type === "image") {
+        const width = 612 * scale;
+        const height = (612 * sourceDocument.height * scale) / sourceDocument.width;
+        setPageSize({ width, height });
+        setPageViewport(pageRef.id, { width, height });
+        setIsRendering(false);
+        return;
+      }
+
+      if (!pdfDocument) {
+        return;
+      }
+
       const page = await pdfDocument.getPage(pageRef.sourcePageIndex + 1);
       const viewport = page.getViewport({
         scale,
@@ -88,7 +107,15 @@ export function PdfPage({
       cancelled = true;
       renderTask?.cancel();
     };
-  }, [pageRef.id, pageRef.rotation, pageRef.sourcePageIndex, pdfDocument, scale, setPageViewport]);
+  }, [
+    pageRef.id,
+    pageRef.rotation,
+    pageRef.sourcePageIndex,
+    pdfDocument,
+    scale,
+    setPageViewport,
+    sourceDocument
+  ]);
 
   const pageAnnotations =
     session?.annotations.filter((annotation) => annotation.pageId === pageRef.id) ??
@@ -146,7 +173,15 @@ export function PdfPage({
           onAnnotationCreated();
         }}
       >
-        <canvas ref={canvasRef} className="block" />
+        {sourceDocument.type === "image" ? (
+          <img
+            className="block h-full w-full object-contain"
+            alt={sourceDocument.fileName}
+            src={createImageDataUrl(sourceDocument)}
+          />
+        ) : (
+          <canvas ref={canvasRef} className="block" />
+        )}
         {isRendering ? (
           <div className="absolute inset-0 flex items-center justify-center bg-white/80 text-sm font-medium text-slate-500">
             Rendering page...
@@ -166,6 +201,15 @@ export function PdfPage({
       </div>
     </div>
   );
+}
+
+function createImageDataUrl(sourceDocument: Extract<SourceDocument, { type: "image" }>): string {
+  const bytes = new Uint8Array(sourceDocument.imageBytes);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return `data:${sourceDocument.mimeType};base64,${btoa(binary)}`;
 }
 
 function isShapeTool(tool: EditorTool): boolean {

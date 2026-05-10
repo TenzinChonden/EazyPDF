@@ -94,7 +94,7 @@ export function StartScreen(): JSX.Element {
               ref={inputRef}
               className="sr-only"
               type="file"
-              accept="application/pdf,.pdf"
+              accept="application/pdf,.pdf,image/jpeg,image/png,image/webp"
               multiple
               onChange={(event) => {
                 if (event.target.files) {
@@ -117,10 +117,10 @@ export function StartScreen(): JSX.Element {
                 <Upload aria-hidden="true" size={22} />
               </span>
               <span className="text-base font-semibold text-slate-950">
-                Upload PDF
+                Upload PDF or image
               </span>
               <span className="mt-2 text-sm text-slate-500">
-                Add one or more PDFs, 25 MB each
+                Add PDFs, JPG, PNG, or WebP files, 25 MB each
               </span>
             </button>
 
@@ -134,7 +134,7 @@ export function StartScreen(): JSX.Element {
               <div className="mt-5 space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-semibold text-slate-800">
-                    Combine PDFs
+                    Combine files
                   </h2>
                   <button
                     className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-teal-700 hover:bg-teal-50"
@@ -142,7 +142,7 @@ export function StartScreen(): JSX.Element {
                     onClick={() => inputRef.current?.click()}
                   >
                     <Plus aria-hidden="true" size={16} />
-                    Add another PDF
+                    Add another file
                   </button>
                 </div>
                 <div className="space-y-2">
@@ -183,8 +183,11 @@ export function StartScreen(): JSX.Element {
                         </div>
                         <div className="text-xs text-slate-500">
                           {formatFileSize(document.fileSize)} ·{" "}
-                          {document.pageCount}{" "}
-                          {document.pageCount === 1 ? "page" : "pages"}
+                          {document.type === "image"
+                            ? "image page"
+                            : `${document.pageCount} ${
+                                document.pageCount === 1 ? "page" : "pages"
+                              }`}
                         </div>
                       </div>
                       <button

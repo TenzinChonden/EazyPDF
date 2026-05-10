@@ -10,12 +10,27 @@ export type EditorSession = {
   updatedAt: number;
 };
 
-export type SourceDocument = {
+export type SourceDocument = PdfSourceDocument | ImageSourceDocument;
+
+export type PdfSourceDocument = {
   id: string;
+  type: "pdf";
   fileName: string;
   fileSize: number;
   pdfBytes: ArrayBuffer;
   pageCount: number;
+};
+
+export type ImageSourceDocument = {
+  id: string;
+  type: "image";
+  fileName: string;
+  fileSize: number;
+  imageBytes: ArrayBuffer;
+  mimeType: "image/jpeg" | "image/png" | "image/webp";
+  width: number;
+  height: number;
+  pageCount: 1;
 };
 
 export type PageRef = {

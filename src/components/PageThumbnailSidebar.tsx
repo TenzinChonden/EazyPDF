@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
@@ -28,6 +30,7 @@ export function PageThumbnailSidebar({
 }: PageThumbnailSidebarProps): JSX.Element {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const {
+    session,
     selectedPageIds,
     togglePageSelection,
     selectAllPages,
@@ -36,9 +39,16 @@ export function PageThumbnailSidebar({
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const lastDragClientY = useRef<number | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   const selectedCount = selectedPageIds.length;
 
-  const handleAddPdf = async (file: File) => {
+  useEffect(() => {
+    return () => stopAutoScroll();
+  }, []);
+
+  const handleAddFile = async (file: File) => {
     setError(null);
 
     try {
@@ -48,22 +58,25 @@ export function PageThumbnailSidebar({
       setError(
         loadError instanceof Error
           ? loadError.message
-          : "We could not add that PDF."
+          : "We could not add that file."
       );
     }
   };
 
   return (
-    <aside className="hidden w-60 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-3 md:block">
+    <aside
+      ref={sidebarRef}
+      className="hidden w-60 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-3 md:block"
+    >
       <input
         ref={inputRef}
         className="sr-only"
         type="file"
-        accept="application/pdf,.pdf"
+        accept="application/pdf,.pdf,image/jpeg,image/png,image/webp"
         onChange={(event) => {
           const file = event.target.files?.item(0);
           if (file) {
-            void handleAddPdf(file);
+            void handleAddFile(file);
           }
           event.currentTarget.value = "";
         }}
@@ -75,7 +88,7 @@ export function PageThumbnailSidebar({
           onClick={() => inputRef.current?.click()}
         >
           <Plus aria-hidden="true" size={16} />
-          Add PDF
+          Add File
         </button>
         <div className="flex items-center justify-between gap-2 text-xs">
           <button
@@ -107,6 +120,9 @@ export function PageThumbnailSidebar({
 
       <div className="space-y-3">
         {pageOrder.map((pageRef, index) => {
+          const sourceDocument = session?.documents.find(
+            (document) => document.id === pageRef.sourceDocumentId
+          );
           const pdfDocument = pdfDocuments[pageRef.sourceDocumentId];
           const isSelected = selectedPageIds.includes(pageRef.id);
 
@@ -126,11 +142,14 @@ export function PageThumbnailSidebar({
               draggable
               onDragStart={(event) => {
                 setDraggedIndex(index);
+                lastDragClientY.current = event.clientY;
+                startAutoScroll();
                 event.dataTransfer.effectAllowed = "move";
                 event.dataTransfer.setData("text/plain", String(index));
               }}
               onDragOver={(event) => {
                 event.preventDefault();
+                lastDragClientY.current = event.clientY;
                 event.dataTransfer.dropEffect = "move";
                 setDragOverIndex(index);
               }}
@@ -140,6 +159,7 @@ export function PageThumbnailSidebar({
                 const fromIndex = Number(
                   event.dataTransfer.getData("text/plain")
                 );
+                stopAutoScroll();
                 setDraggedIndex(null);
                 setDragOverIndex(null);
 
@@ -152,6 +172,7 @@ export function PageThumbnailSidebar({
                 }
               }}
               onDragEnd={() => {
+                stopAutoScroll();
                 setDraggedIndex(null);
                 setDragOverIndex(null);
               }}
@@ -170,7 +191,9 @@ export function PageThumbnailSidebar({
                   Page {index + 1}
                 </span>
               </div>
-              {pdfDocument ? (
+              {sourceDocument?.type === "image" ? (
+                <ImageThumbnail sourceDocument={sourceDocument} pageRef={pageRef} />
+              ) : pdfDocument ? (
                 <PageThumbnail pdfDocument={pdfDocument} pageRef={pageRef} />
               ) : (
                 <div className="h-32 rounded-sm bg-slate-200" />
@@ -180,6 +203,62 @@ export function PageThumbnailSidebar({
         })}
       </div>
     </aside>
+  );
+
+  function startAutoScroll(): void {
+    if (animationFrameRef.current !== null) {
+      return;
+    }
+
+    const step = () => {
+      const sidebar = sidebarRef.current;
+      const clientY = lastDragClientY.current;
+
+      if (sidebar && clientY !== null) {
+        const rect = sidebar.getBoundingClientRect();
+        const edgeSize = 40;
+        const maxSpeed = 14;
+
+        if (clientY < rect.top + edgeSize) {
+          const intensity = (rect.top + edgeSize - clientY) / edgeSize;
+          sidebar.scrollTop -= Math.ceil(maxSpeed * intensity);
+        } else if (clientY > rect.bottom - edgeSize) {
+          const intensity = (clientY - (rect.bottom - edgeSize)) / edgeSize;
+          sidebar.scrollTop += Math.ceil(maxSpeed * intensity);
+        }
+      }
+
+      animationFrameRef.current = requestAnimationFrame(step);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(step);
+  }
+
+  function stopAutoScroll(): void {
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    lastDragClientY.current = null;
+  }
+}
+
+function ImageThumbnail({
+  sourceDocument,
+  pageRef
+}: {
+  sourceDocument: Extract<SourceDocument, { type: "image" }>;
+  pageRef: PageRef;
+}): JSX.Element {
+  return (
+    <div className="relative min-h-24 overflow-hidden rounded-sm bg-white shadow-sm ring-1 ring-slate-200">
+      <img
+        className="block w-full object-contain"
+        alt={sourceDocument.fileName}
+        src={createImageDataUrl(sourceDocument)}
+        style={{ transform: `rotate(${pageRef.rotation}deg)` }}
+      />
+    </div>
   );
 }
 
@@ -245,4 +324,13 @@ function PageThumbnail({
       ) : null}
     </div>
   );
+}
+
+function createImageDataUrl(sourceDocument: Extract<SourceDocument, { type: "image" }>): string {
+  const bytes = new Uint8Array(sourceDocument.imageBytes);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return `data:${sourceDocument.mimeType};base64,${btoa(binary)}`;
 }

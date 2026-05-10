@@ -5,7 +5,7 @@ import { getDocument, type PDFDocumentProxy } from "pdfjs-dist";
 import { PdfPage } from "@/components/PdfPage";
 import { useEditorSession } from "@/context/EditorSessionContext";
 import { configurePdfWorker } from "@/lib/pdf/pdfWorker";
-import type { EditorTool } from "@/types/editor";
+import type { EditorTool, PdfSourceDocument } from "@/types/editor";
 
 type PdfDocumentMap = Record<string, PDFDocumentProxy>;
 
@@ -37,7 +37,10 @@ export function PdfViewer({
     }
 
     let cancelled = false;
-    const loadingTasks = documents.map((document) => {
+    const pdfSources = documents.filter(
+      (document): document is PdfSourceDocument => document.type === "pdf"
+    );
+    const loadingTasks = pdfSources.map((document) => {
       configurePdfWorker();
       return {
         documentId: document.id,
@@ -152,9 +155,16 @@ export function PdfViewer({
     <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto px-4 py-6">
       <div className="mx-auto flex w-max min-w-full flex-col items-center gap-8">
         {session.pageOrder.map((pageRef, index) => {
+          const sourceDocument = session.documents.find(
+            (document) => document.id === pageRef.sourceDocumentId
+          );
           const pdfDocument = pdfDocuments[pageRef.sourceDocumentId];
 
-          if (!pdfDocument) {
+          if (!sourceDocument) {
+            return null;
+          }
+
+          if (sourceDocument.type === "pdf" && !pdfDocument) {
             return null;
           }
 
@@ -164,6 +174,7 @@ export function PdfViewer({
               activeTool={activeTool}
               displayPageNumber={index + 1}
               pageRef={pageRef}
+              sourceDocument={sourceDocument}
               pdfDocument={pdfDocument}
               scale={session.scale}
               onPageRef={(element) => {

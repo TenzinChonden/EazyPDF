@@ -1,4 +1,11 @@
-import { degrees, PDFDocument, type PDFFont, rgb, StandardFonts } from "pdf-lib";
+import {
+  degrees,
+  PDFDocument,
+  type PDFFont,
+  type PDFImage,
+  rgb,
+  StandardFonts
+} from "pdf-lib";
 import { stripHtml } from "@/lib/richText/html";
 import type {
   EditorSession,
@@ -116,9 +123,11 @@ export async function generateEditedPdfBlob(
   if (!hasUserChanges(session, options.pageIds)) {
     logExportPath("no-op original export", session);
     const sourceDocument = session.documents[0];
-    return new Blob([sourceDocument.pdfBytes.slice(0)], {
-      type: "application/pdf"
-    });
+    if (sourceDocument?.type === "pdf") {
+      return new Blob([sourceDocument.pdfBytes.slice(0)], {
+        type: "application/pdf"
+      });
+    }
   }
 
   logExportPath(
@@ -145,17 +154,15 @@ export async function generateEditedPdfBlob(
       continue;
     }
 
-    const sourcePdf =
-      sourcePdfCache.get(sourceDocument.id) ??
-      (await PDFDocument.load(sourceDocument.pdfBytes.slice(0)));
-    sourcePdfCache.set(sourceDocument.id, sourcePdf);
-
-    const [copiedPage] = await outputPdf.copyPages(sourcePdf, [
-      pageRef.sourcePageIndex
-    ]);
-    const originalRotation = copiedPage.getRotation().angle;
-    copiedPage.setRotation(degrees((originalRotation + pageRef.rotation) % 360));
-    outputPdf.addPage(copiedPage);
+    const outputPage =
+      sourceDocument.type === "pdf"
+        ? await copyPdfSourcePage(
+            outputPdf,
+            sourcePdfCache,
+            sourceDocument,
+            pageRef
+          )
+        : await createImageSourcePage(outputPdf, sourceDocument, pageRef);
 
     const pageAnnotations = session.annotations.filter(
       (annotation) => annotation.pageId === pageRef.id
@@ -165,7 +172,7 @@ export async function generateEditedPdfBlob(
       if (annotation.type === "text") {
         await drawTextAnnotation(
           annotation,
-          copiedPage,
+          outputPage,
           pageRef,
           session,
           fontCache,
@@ -174,7 +181,7 @@ export async function generateEditedPdfBlob(
       } else if (annotation.type === "shape") {
         drawShapeAnnotation(
           annotation,
-          copiedPage,
+          outputPage,
           pageRef,
           session
         );
@@ -186,6 +193,104 @@ export async function generateEditedPdfBlob(
   const pdfBuffer = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(pdfBuffer).set(bytes);
   return new Blob([pdfBuffer], { type: "application/pdf" });
+}
+
+async function copyPdfSourcePage(
+  outputPdf: PDFDocument,
+  sourcePdfCache: Map<string, PDFDocument>,
+  sourceDocument: Extract<EditorSession["documents"][number], { type: "pdf" }>,
+  pageRef: PageRef
+): Promise<ReturnType<PDFDocument["getPages"]>[number]> {
+  const sourcePdf =
+    sourcePdfCache.get(sourceDocument.id) ??
+    (await PDFDocument.load(sourceDocument.pdfBytes.slice(0)));
+  sourcePdfCache.set(sourceDocument.id, sourcePdf);
+
+  const [copiedPage] = await outputPdf.copyPages(sourcePdf, [
+    pageRef.sourcePageIndex
+  ]);
+  const originalRotation = copiedPage.getRotation().angle;
+  copiedPage.setRotation(degrees((originalRotation + pageRef.rotation) % 360));
+  outputPdf.addPage(copiedPage);
+  return copiedPage;
+}
+
+async function createImageSourcePage(
+  outputPdf: PDFDocument,
+  sourceDocument: Extract<EditorSession["documents"][number], { type: "image" }>,
+  pageRef: PageRef
+): Promise<ReturnType<PDFDocument["getPages"]>[number]> {
+  const pageWidth = 612;
+  const pageHeight = (pageWidth * sourceDocument.height) / sourceDocument.width;
+  const page = outputPdf.addPage([pageWidth, pageHeight]);
+  const image = await embedSourceImage(outputPdf, sourceDocument);
+
+  page.drawImage(image, {
+    x: 0,
+    y: 0,
+    width: pageWidth,
+    height: pageHeight
+  });
+  page.setRotation(degrees(pageRef.rotation));
+  return page;
+}
+
+async function embedSourceImage(
+  outputPdf: PDFDocument,
+  sourceDocument: Extract<EditorSession["documents"][number], { type: "image" }>
+): Promise<PDFImage> {
+  const bytes = new Uint8Array(sourceDocument.imageBytes);
+
+  if (sourceDocument.mimeType === "image/jpeg") {
+    return outputPdf.embedJpg(bytes);
+  }
+
+  if (sourceDocument.mimeType === "image/png") {
+    return outputPdf.embedPng(bytes);
+  }
+
+  const pngBytes = await convertImageToPngBytes(sourceDocument);
+  return outputPdf.embedPng(pngBytes);
+}
+
+async function convertImageToPngBytes(
+  sourceDocument: Extract<EditorSession["documents"][number], { type: "image" }>
+): Promise<Uint8Array> {
+  const blob = new Blob([sourceDocument.imageBytes], {
+    type: sourceDocument.mimeType
+  });
+  const objectUrl = URL.createObjectURL(blob);
+
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Could not convert image page."));
+      element.src = objectUrl;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = sourceDocument.width;
+    canvas.height = sourceDocument.height;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Could not create image conversion canvas.");
+    }
+
+    context.drawImage(image, 0, 0);
+    const pngBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((nextBlob) => {
+        if (nextBlob) {
+          resolve(nextBlob);
+        } else {
+          reject(new Error("Could not convert image page."));
+        }
+      }, "image/png");
+    });
+    return new Uint8Array(await pngBlob.arrayBuffer());
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function getExportPageOrder(session: EditorSession, pageIds?: string[]): PageRef[] {
