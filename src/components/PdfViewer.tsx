@@ -5,13 +5,12 @@ import { getDocument, type PDFDocumentProxy } from "pdfjs-dist";
 import { PdfPage } from "@/components/PdfPage";
 import { useEditorSession } from "@/context/EditorSessionContext";
 import { configurePdfWorker } from "@/lib/pdf/pdfWorker";
-import type { EditorTool, ShapeKind } from "@/types/editor";
+import type { EditorTool } from "@/types/editor";
 
 type PdfDocumentMap = Record<string, PDFDocumentProxy>;
 
 type PdfViewerProps = {
   activeTool: EditorTool;
-  activeShapeKind: ShapeKind;
   onDocumentsReady: (pdfDocuments: PdfDocumentMap) => void;
   onPageRef: (pageId: string, element: HTMLDivElement | null) => void;
   onAnnotationCreated: () => void;
@@ -19,7 +18,6 @@ type PdfViewerProps = {
 
 export function PdfViewer({
   activeTool,
-  activeShapeKind,
   onDocumentsReady,
   onPageRef,
   onAnnotationCreated
@@ -164,7 +162,6 @@ export function PdfViewer({
             <PdfPage
               key={pageRef.id}
               activeTool={activeTool}
-              activeShapeKind={activeShapeKind}
               displayPageNumber={index + 1}
               pageRef={pageRef}
               pdfDocument={pdfDocument}

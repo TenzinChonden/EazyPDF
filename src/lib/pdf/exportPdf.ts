@@ -18,12 +18,24 @@ type TextRun = {
   lineBreak?: boolean;
 };
 
+export type PdfExportOptions = {
+  pageIds?: string[];
+};
+
 function safeFileName(fileName: string): string {
   return fileName.trim() || "document.pdf";
 }
 
-export function hasAnnotationChanges(session: EditorSession): boolean {
-  return session.annotations.length > 0;
+export function hasAnnotationChanges(
+  session: EditorSession,
+  pageIds?: string[]
+): boolean {
+  if (!pageIds) {
+    return session.annotations.length > 0;
+  }
+
+  const pageIdSet = new Set(pageIds);
+  return session.annotations.some((annotation) => pageIdSet.has(annotation.pageId));
 }
 
 export function hasCombinedDocuments(session: EditorSession): boolean {
@@ -42,30 +54,37 @@ export function hasRotationChanges(session: EditorSession): boolean {
   return session.pageOrder.some((page) => page.rotation !== 0);
 }
 
-export function hasPageOrderChanges(session: EditorSession): boolean {
+export function hasPageOrderChanges(
+  session: EditorSession,
+  pageIds?: string[]
+): boolean {
   if (session.documents.length !== 1) {
     return false;
   }
 
   const document = session.documents[0];
+  const pageOrder = getExportPageOrder(session, pageIds);
 
-  if (session.pageOrder.length !== document.pageCount) {
+  if (pageOrder.length !== document.pageCount) {
     return true;
   }
 
-  return session.pageOrder.some(
+  return pageOrder.some(
     (page, index) =>
       page.sourceDocumentId !== document.id || page.sourcePageIndex !== index
   );
 }
 
-export function hasUserChanges(session: EditorSession): boolean {
+export function hasUserChanges(
+  session: EditorSession,
+  pageIds?: string[]
+): boolean {
   return (
-    hasAnnotationChanges(session) ||
+    hasAnnotationChanges(session, pageIds) ||
     hasCombinedDocuments(session) ||
     hasDeletedPages(session) ||
-    hasRotationChanges(session) ||
-    hasPageOrderChanges(session)
+    hasRotationChangesForPages(session, pageIds) ||
+    hasPageOrderChanges(session, pageIds)
   );
 }
 
@@ -81,14 +100,20 @@ function logExportPath(path: string, session: EditorSession): void {
   });
 }
 
-export async function exportEditedPdf(session: EditorSession): Promise<Blob> {
-  return generateEditedPdfBlob(session);
+export async function exportEditedPdf(
+  session: EditorSession,
+  options: PdfExportOptions = {}
+): Promise<Blob> {
+  return generateEditedPdfBlob(session, options);
 }
 
 export async function generateEditedPdfBlob(
-  session: EditorSession
+  session: EditorSession,
+  options: PdfExportOptions = {}
 ): Promise<Blob> {
-  if (!hasUserChanges(session)) {
+  const exportPageOrder = getExportPageOrder(session, options.pageIds);
+
+  if (!hasUserChanges(session, options.pageIds)) {
     logExportPath("no-op original export", session);
     const sourceDocument = session.documents[0];
     return new Blob([sourceDocument.pdfBytes.slice(0)], {
@@ -99,7 +124,7 @@ export async function generateEditedPdfBlob(
   logExportPath(
     hasCombinedDocuments(session)
       ? "combined PDF export"
-      : hasAnnotationChanges(session)
+      : hasAnnotationChanges(session, options.pageIds)
         ? "copy-pages + annotations export"
         : "copy-pages export",
     session
@@ -111,7 +136,7 @@ export async function generateEditedPdfBlob(
   const fontCache = new Map<StandardFonts, PDFFont>();
   const sourcePdfCache = new Map<string, PDFDocument>();
 
-  for (const pageRef of session.pageOrder) {
+  for (const pageRef of exportPageOrder) {
     const sourceDocument = session.documents.find(
       (document) => document.id === pageRef.sourceDocumentId
     );
@@ -161,6 +186,23 @@ export async function generateEditedPdfBlob(
   const pdfBuffer = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(pdfBuffer).set(bytes);
   return new Blob([pdfBuffer], { type: "application/pdf" });
+}
+
+function getExportPageOrder(session: EditorSession, pageIds?: string[]): PageRef[] {
+  if (!pageIds) {
+    return session.pageOrder;
+  }
+
+  const pageIdSet = new Set(pageIds);
+  return session.pageOrder.filter((page) => pageIdSet.has(page.id));
+}
+
+function hasRotationChangesForPages(
+  session: EditorSession,
+  pageIds?: string[]
+): boolean {
+  const pageOrder = getExportPageOrder(session, pageIds);
+  return pageOrder.some((page) => page.rotation !== 0);
 }
 
 function drawShapeAnnotation(
@@ -521,7 +563,7 @@ export function downloadBlob(blob: Blob, originalFileName: string): void {
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = objectUrl;
-  link.download = `edited-${safeFileName(originalFileName)}`;
+  link.download = safeFileName(originalFileName);
   document.body.appendChild(link);
   link.click();
   link.remove();

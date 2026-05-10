@@ -87,4 +87,9 @@ export type PageViewportSize = {
   height: number;
 };
 
-export type EditorTool = "select" | "text" | "shape";
+export type EditorTool =
+  | "select"
+  | "text"
+  | "shape-check"
+  | "shape-cross"
+  | "shape-circle";

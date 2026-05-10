@@ -128,7 +128,7 @@ export function EditorToolbar({
         <span>Text</span>
       </button>
       <button
-        className={toolButtonClass(activeTool === "shape")}
+        className={toolButtonClass(activeTool === "shape-check")}
         type="button"
         title="Check"
         onClick={() => onShapeSelect("check")}
@@ -137,7 +137,7 @@ export function EditorToolbar({
         <span>Check</span>
       </button>
       <button
-        className={toolButtonClass(activeTool === "shape")}
+        className={toolButtonClass(activeTool === "shape-cross")}
         type="button"
         title="Cross"
         onClick={() => onShapeSelect("cross")}
@@ -146,7 +146,7 @@ export function EditorToolbar({
         <span>Cross</span>
       </button>
       <button
-        className={toolButtonClass(activeTool === "shape")}
+        className={toolButtonClass(activeTool === "shape-circle")}
         type="button"
         title="Circle"
         onClick={() => onShapeSelect("circle")}

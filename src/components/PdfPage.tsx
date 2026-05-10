@@ -14,7 +14,6 @@ import type {
 
 type PdfPageProps = {
   activeTool: EditorTool;
-  activeShapeKind: ShapeKind;
   displayPageNumber: number;
   pageRef: PageRef;
   pdfDocument: PDFDocumentProxy;
@@ -25,7 +24,6 @@ type PdfPageProps = {
 
 export function PdfPage({
   activeTool,
-  activeShapeKind,
   displayPageNumber,
   pageRef,
   pdfDocument,
@@ -135,10 +133,10 @@ export function PdfPage({
               width: 160,
               height: 48
             });
-          } else if (activeTool === "shape") {
+          } else if (isShapeTool(activeTool)) {
             addShapeAnnotation({
               pageId: pageRef.id,
-              kind: activeShapeKind,
+              kind: getShapeKindFromTool(activeTool),
               x,
               y
             });
@@ -168,4 +166,20 @@ export function PdfPage({
       </div>
     </div>
   );
+}
+
+function isShapeTool(tool: EditorTool): boolean {
+  return tool.startsWith("shape-");
+}
+
+function getShapeKindFromTool(tool: EditorTool): ShapeKind {
+  if (tool === "shape-cross") {
+    return "cross";
+  }
+
+  if (tool === "shape-circle") {
+    return "circle";
+  }
+
+  return "check";
 }

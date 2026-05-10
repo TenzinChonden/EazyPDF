@@ -11,35 +11,33 @@ export type ImageExportFormat = "png" | "jpeg";
 const IMAGE_EXPORT_SCALE = 2.5;
 const JPEG_QUALITY = 0.92;
 
-export async function exportCurrentPageAsImage(
-  session: EditorSession,
-  format: ImageExportFormat
-): Promise<void> {
-  const pdfBlob = await generateEditedPdfBlob(session);
-  const pageNumber = getCurrentExportPageNumber(session);
-  const imageBlob = await renderPdfPageToImageBlob(
-    pdfBlob,
-    pageNumber,
-    format,
-    IMAGE_EXPORT_SCALE
-  );
-  downloadBlob(
-    imageBlob,
-    `eazypdf-page-${pageNumber}.${format === "jpeg" ? "jpg" : "png"}`
-  );
-}
-
-export async function exportAllPagesAsImagesZip(
+export async function exportPagesAsImages(
   session: EditorSession,
   format: ImageExportFormat,
+  pageIds: string[],
+  exportName: string,
   onProgress?: (currentPage: number, totalPages: number) => void
 ): Promise<void> {
-  const pdfBlob = await generateEditedPdfBlob(session);
-  const pdfDocument = await loadPdfDocumentFromBlob(pdfBlob);
-  const zip = new JSZip();
+  const pdfBlob = await generateEditedPdfBlob(session, { pageIds });
   const extension = format === "jpeg" ? "jpg" : "png";
 
+  const pdfDocument = await loadPdfDocumentFromBlob(pdfBlob);
+
   try {
+    if (pdfDocument.numPages === 1) {
+      onProgress?.(1, 1);
+      const imageBlob = await renderPdfPageFromDocumentToImageBlob(
+        pdfDocument,
+        1,
+        format,
+        IMAGE_EXPORT_SCALE
+      );
+      downloadBlob(imageBlob, `${exportName}.${extension}`);
+      return;
+    }
+
+    const zip = new JSZip();
+
     for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
       onProgress?.(pageNumber, pdfDocument.numPages);
       const imageBlob = await renderPdfPageFromDocumentToImageBlob(
@@ -48,14 +46,17 @@ export async function exportAllPagesAsImagesZip(
         format,
         IMAGE_EXPORT_SCALE
       );
-      zip.file(`page-${String(pageNumber).padStart(3, "0")}.${extension}`, imageBlob);
+      zip.file(
+        `${exportName}-page-${String(pageNumber).padStart(3, "0")}.${extension}`,
+        imageBlob
+      );
     }
+
+    const zipBlob = await zip.generateAsync({ type: "blob" });
+    downloadBlob(zipBlob, `${exportName}.zip`);
   } finally {
     await pdfDocument.destroy();
   }
-
-  const zipBlob = await zip.generateAsync({ type: "blob" });
-  downloadBlob(zipBlob, `eazypdf-pages-${format === "jpeg" ? "jpeg" : "png"}.zip`);
 }
 
 export async function renderPdfPageToImageBlob(
@@ -123,11 +124,4 @@ async function renderPdfPageFromDocumentToImageBlob(
       format === "jpeg" ? JPEG_QUALITY : undefined
     );
   });
-}
-
-function getCurrentExportPageNumber(session: EditorSession): number {
-  const currentIndex = session.pageOrder.findIndex(
-    (page) => page.id === session.currentPageId
-  );
-  return currentIndex >= 0 ? currentIndex + 1 : 1;
 }
