@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download } from "lucide-react";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import { EditorToolbar } from "@/components/EditorToolbar";
 import { PageThumbnailSidebar } from "@/components/PageThumbnailSidebar";
 import { PdfViewer } from "@/components/PdfViewer";
@@ -10,17 +11,18 @@ import { useEditorSession } from "@/context/EditorSessionContext";
 import { downloadBlob, exportEditedPdf } from "@/lib/pdf/exportPdf";
 import { formatFileSize } from "@/lib/utils/formatFileSize";
 import type { EditorTool } from "@/types/editor";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+
+type PdfDocumentMap = Record<string, PDFDocumentProxy>;
 
 export default function EditorPage(): JSX.Element {
   const router = useRouter();
-  const { session, reorderPages, setCurrentPage } = useEditorSession();
+  const { session, addSourceDocument, reorderPages, setCurrentPage } =
+    useEditorSession();
   const [tool, setTool] = useState<EditorTool>("select");
-  const [pageCount, setPageCount] = useState(0);
-  const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
+  const [pdfDocuments, setPdfDocuments] = useState<PdfDocumentMap>({});
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     if (!session) {
@@ -36,13 +38,18 @@ export default function EditorPage(): JSX.Element {
     );
   }
 
+  const totalFileSize = session.documents.reduce(
+    (total, document) => total + document.fileSize,
+    0
+  );
+
   const handleDownload = async () => {
     setIsExporting(true);
     setExportError(null);
 
     try {
       const blob = await exportEditedPdf(session);
-      downloadBlob(blob, session.fileName);
+      downloadBlob(blob, session.documents[0]?.fileName ?? "combined.pdf");
     } catch {
       setExportError("Export failed. Try again after the PDF finishes rendering.");
     } finally {
@@ -60,7 +67,9 @@ export default function EditorPage(): JSX.Element {
           <div className="min-w-0">
             <div className="font-bold leading-5">EazyPDF</div>
             <div className="truncate text-xs text-slate-500">
-              {session.fileName} · {formatFileSize(session.fileSize)}
+              {session.documents.length}{" "}
+              {session.documents.length === 1 ? "PDF" : "PDFs"} ·{" "}
+              {formatFileSize(totalFileSize)}
             </div>
           </div>
         </div>
@@ -77,13 +86,13 @@ export default function EditorPage(): JSX.Element {
 
       <div className="flex min-h-0 flex-1">
         <PageThumbnailSidebar
-          currentPage={session.currentPage}
-          pageCount={pageCount}
+          currentPageId={session.currentPageId}
           pageOrder={session.pageOrder}
-          pdfDocument={pdfDocument}
-          onSelectPage={(pageNumber) => {
-            setCurrentPage(pageNumber);
-            pageRefs.current[pageNumber]?.scrollIntoView({
+          pdfDocuments={pdfDocuments}
+          onAddDocument={addSourceDocument}
+          onSelectPage={(pageId) => {
+            setCurrentPage(pageId);
+            pageRefs.current[pageId]?.scrollIntoView({
               behavior: "smooth",
               block: "start"
             });
@@ -100,10 +109,9 @@ export default function EditorPage(): JSX.Element {
           ) : null}
           <PdfViewer
             activeTool={tool}
-            onDocumentLoaded={setPageCount}
-            onDocumentReady={setPdfDocument}
-            onPageRef={(pageNumber, element) => {
-              pageRefs.current[pageNumber] = element;
+            onDocumentsReady={setPdfDocuments}
+            onPageRef={(pageId, element) => {
+              pageRefs.current[pageId] = element;
             }}
             onTextCreated={() => setTool("select")}
           />

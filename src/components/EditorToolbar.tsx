@@ -4,6 +4,8 @@ import {
   Bold,
   Italic,
   MousePointer2,
+  RotateCcw,
+  RotateCw,
   Trash2,
   Type,
   ZoomIn,
@@ -67,6 +69,7 @@ export function EditorToolbar({
     selectedAnnotationId,
     updateTextAnnotation,
     deleteTextAnnotation,
+    rotatePages,
     setScale
   } = useEditorSession();
   const scale = session?.scale ?? 1.25;
@@ -127,6 +130,25 @@ export function EditorToolbar({
         onClick={() => setScale(scale + 0.25)}
       >
         <ZoomIn aria-hidden="true" size={18} />
+      </button>
+      <div className="mx-2 h-6 w-px bg-slate-200" />
+      <button
+        className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+        type="button"
+        title="Rotate Left"
+        onClick={() => rotatePages("left")}
+      >
+        <RotateCcw aria-hidden="true" size={17} />
+        <span>Rotate Left</span>
+      </button>
+      <button
+        className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+        type="button"
+        title="Rotate Right"
+        onClick={() => rotatePages("right")}
+      >
+        <RotateCw aria-hidden="true" size={17} />
+        <span>Rotate Right</span>
       </button>
       {selectedAnnotation ? (
         <>

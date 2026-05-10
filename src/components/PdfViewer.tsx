@@ -1,65 +1,82 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getDocument, type PDFDocumentProxy } from "pdfjs-dist";
 import { PdfPage } from "@/components/PdfPage";
 import { useEditorSession } from "@/context/EditorSessionContext";
 import { configurePdfWorker } from "@/lib/pdf/pdfWorker";
 import type { EditorTool } from "@/types/editor";
 
+type PdfDocumentMap = Record<string, PDFDocumentProxy>;
+
 type PdfViewerProps = {
   activeTool: EditorTool;
-  onDocumentLoaded: (pageCount: number) => void;
-  onDocumentReady: (pdfDocument: PDFDocumentProxy | null) => void;
-  onPageRef: (pageNumber: number, element: HTMLDivElement | null) => void;
+  onDocumentsReady: (pdfDocuments: PdfDocumentMap) => void;
+  onPageRef: (pageId: string, element: HTMLDivElement | null) => void;
   onTextCreated: () => void;
 };
 
 export function PdfViewer({
   activeTool,
-  onDocumentLoaded,
-  onDocumentReady,
+  onDocumentsReady,
   onPageRef,
   onTextCreated
 }: PdfViewerProps): JSX.Element {
-  const { session, initializePageOrder, setCurrentPage } = useEditorSession();
+  const { session, setCurrentPage } = useEditorSession();
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const pageElements = useRef<Record<number, HTMLDivElement | null>>({});
-  const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
+  const pageElements = useRef<Record<string, HTMLDivElement | null>>({});
+  const [pdfDocuments, setPdfDocuments] = useState<PdfDocumentMap>({});
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const pdfBytes = session?.pdfBytes;
-  const sessionId = session?.sessionId;
+  const documents = useMemo(() => session?.documents ?? [], [session?.documents]);
+  const documentSignature = documents.map((document) => document.id).join("|");
 
   useEffect(() => {
-    if (!pdfBytes || !sessionId) {
+    if (documents.length === 0) {
       return;
     }
 
     let cancelled = false;
-    setIsLoading(true);
-    setError(null);
-    configurePdfWorker();
-
-    const loadingTask = getDocument({
-      data: new Uint8Array(pdfBytes.slice(0))
+    const loadingTasks = documents.map((document) => {
+      configurePdfWorker();
+      return {
+        documentId: document.id,
+        task: getDocument({
+          data: new Uint8Array(document.pdfBytes.slice(0))
+        })
+      };
     });
 
-    loadingTask.promise
-      .then((loadedPdf) => {
+    setIsLoading(true);
+    setError(null);
+
+    Promise.all(
+      loadingTasks.map(async ({ documentId, task }) => ({
+        documentId,
+        pdfDocument: await task.promise
+      }))
+    )
+      .then((loadedDocuments) => {
         if (cancelled) {
-          loadedPdf.destroy();
+          loadedDocuments.forEach(({ pdfDocument }) => {
+            void pdfDocument.destroy();
+          });
           return;
         }
 
-        setPdfDocument(loadedPdf);
-        onDocumentLoaded(loadedPdf.numPages);
-        initializePageOrder(loadedPdf.numPages);
-        onDocumentReady(loadedPdf);
+        const nextDocuments = loadedDocuments.reduce<PdfDocumentMap>(
+          (map, item) => ({
+            ...map,
+            [item.documentId]: item.pdfDocument
+          }),
+          {}
+        );
+        setPdfDocuments(nextDocuments);
+        onDocumentsReady(nextDocuments);
       })
       .catch(() => {
         if (!cancelled) {
-          setError("We could not render this PDF in the browser.");
+          setError("We could not render one of these PDFs in the browser.");
         }
       })
       .finally(() => {
@@ -70,19 +87,13 @@ export function PdfViewer({
 
     return () => {
       cancelled = true;
-      onDocumentReady(null);
-      loadingTask.destroy();
+      onDocumentsReady({});
+      loadingTasks.forEach(({ task }) => task.destroy());
     };
-  }, [
-    initializePageOrder,
-    onDocumentLoaded,
-    onDocumentReady,
-    pdfBytes,
-    sessionId
-  ]);
+  }, [documentSignature, documents, onDocumentsReady]);
 
   useEffect(() => {
-    if (!pdfDocument || !scrollContainerRef.current) {
+    if (!scrollContainerRef.current) {
       return;
     }
 
@@ -91,12 +102,10 @@ export function PdfViewer({
         const visibleEntry = entries
           .filter((entry) => entry.isIntersecting)
           .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        const pageNumber = Number(
-          visibleEntry?.target.getAttribute("data-page-number")
-        );
+        const pageId = visibleEntry?.target.getAttribute("data-page-id");
 
-        if (pageNumber) {
-          setCurrentPage(pageNumber);
+        if (pageId) {
+          setCurrentPage(pageId);
         }
       },
       {
@@ -113,7 +122,7 @@ export function PdfViewer({
     });
 
     return () => observer.disconnect();
-  }, [pdfDocument, session?.scale, setCurrentPage]);
+  }, [session?.pageOrder, session?.scale, setCurrentPage]);
 
   if (isLoading) {
     return (
@@ -131,7 +140,7 @@ export function PdfViewer({
     );
   }
 
-  if (!pdfDocument || !session) {
+  if (!session) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
         No PDF loaded.
@@ -142,24 +151,29 @@ export function PdfViewer({
   return (
     <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto px-4 py-6">
       <div className="mx-auto flex w-max min-w-full flex-col items-center gap-8">
-        {(session.pageOrder.length
-          ? session.pageOrder
-          : Array.from({ length: pdfDocument.numPages }, (_, index) => index + 1)
-        ).map((originalPageNumber, index) => (
-          <PdfPage
-            key={`${session.sessionId}-${originalPageNumber}`}
-            activeTool={activeTool}
-            displayPageNumber={index + 1}
-            pageNumber={originalPageNumber}
-            pdfDocument={pdfDocument}
-            scale={session.scale}
-            onPageRef={(element) => {
-              pageElements.current[originalPageNumber] = element;
-              onPageRef(originalPageNumber, element);
-            }}
-            onTextCreated={onTextCreated}
-          />
-        ))}
+        {session.pageOrder.map((pageRef, index) => {
+          const pdfDocument = pdfDocuments[pageRef.sourceDocumentId];
+
+          if (!pdfDocument) {
+            return null;
+          }
+
+          return (
+            <PdfPage
+              key={pageRef.id}
+              activeTool={activeTool}
+              displayPageNumber={index + 1}
+              pageRef={pageRef}
+              pdfDocument={pdfDocument}
+              scale={session.scale}
+              onPageRef={(element) => {
+                pageElements.current[pageRef.id] = element;
+                onPageRef(pageRef.id, element);
+              }}
+              onTextCreated={onTextCreated}
+            />
+          );
+        })}
       </div>
     </div>
   );

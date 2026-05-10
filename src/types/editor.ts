@@ -1,23 +1,38 @@
 export type EditorSession = {
   sessionId: string;
-  fileName: string;
-  fileSize: number;
-  pdfBytes: ArrayBuffer;
+  documents: SourceDocument[];
+  pageOrder: PageRef[];
   annotations: Annotation[];
-  currentPage: number;
-  pageOrder: number[];
+  currentPageId: string | null;
   scale: number;
-  pageViewports: Record<number, PageViewportSize>;
+  pageViewports: Record<string, PageViewportSize>;
   createdAt: number;
   updatedAt: number;
 };
+
+export type SourceDocument = {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  pdfBytes: ArrayBuffer;
+  pageCount: number;
+};
+
+export type PageRef = {
+  id: string;
+  sourceDocumentId: string;
+  sourcePageIndex: number;
+  rotation: PageRotation;
+};
+
+export type PageRotation = 0 | 90 | 180 | 270;
 
 export type Annotation = TextAnnotation;
 
 export type TextAnnotation = {
   id: string;
   type: "text";
-  pageNumber: number;
+  pageId: string;
   x: number;
   y: number;
   width: number;

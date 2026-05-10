@@ -10,20 +10,22 @@ import {
 } from "react";
 import type {
   EditorSession,
+  PageRef,
+  PageRotation,
   PageViewportSize,
+  SourceDocument,
   TextAnnotation
 } from "@/types/editor";
 
 type CreateSessionInput = {
-  fileName: string;
-  fileSize: number;
-  pdfBytes: ArrayBuffer;
+  documents: SourceDocument[];
 };
 
 type EditorSessionContextValue = {
   session: EditorSession | null;
   selectedAnnotationId: string | null;
   autoFocusAnnotationId: string | null;
+  selectedPageIds: string[];
   createSession: (input: CreateSessionInput) => void;
   clearSession: () => void;
   addTextAnnotation: (
@@ -47,11 +49,15 @@ type EditorSessionContextValue = {
   deleteTextAnnotation: (id: string) => void;
   selectAnnotation: (id: string | null) => void;
   clearAutoFocusAnnotation: () => void;
-  initializePageOrder: (pageCount: number) => void;
+  addSourceDocument: (document: SourceDocument) => void;
   reorderPages: (fromIndex: number, toIndex: number) => void;
+  togglePageSelection: (pageId: string) => void;
+  selectAllPages: () => void;
+  clearPageSelection: () => void;
+  rotatePages: (direction: "left" | "right") => void;
   setScale: (scale: number) => void;
-  setCurrentPage: (pageNumber: number) => void;
-  setPageViewport: (pageNumber: number, size: PageViewportSize) => void;
+  setCurrentPage: (pageId: string) => void;
+  setPageViewport: (pageId: string, size: PageViewportSize) => void;
 };
 
 const EditorSessionContext = createContext<EditorSessionContextValue | null>(
@@ -78,6 +84,7 @@ export function EditorSessionProvider({
   const [autoFocusAnnotationId, setAutoFocusAnnotationId] = useState<
     string | null
   >(null);
+  const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
 
   const touch = useCallback(
     (updater: (current: EditorSession) => EditorSession) => {
@@ -97,14 +104,13 @@ export function EditorSessionProvider({
 
   const createSession = useCallback((input: CreateSessionInput) => {
     const now = Date.now();
+    const pageOrder = createPageRefs(input.documents);
     setSession({
       sessionId: createId(),
-      fileName: input.fileName,
-      fileSize: input.fileSize,
-      pdfBytes: input.pdfBytes,
+      documents: input.documents,
       annotations: [],
-      currentPage: 1,
-      pageOrder: [],
+      currentPageId: pageOrder[0]?.id ?? null,
+      pageOrder,
       scale: 1.25,
       pageViewports: {},
       createdAt: now,
@@ -112,12 +118,14 @@ export function EditorSessionProvider({
     });
     setSelectedAnnotationId(null);
     setAutoFocusAnnotationId(null);
+    setSelectedPageIds([]);
   }, []);
 
   const clearSession = useCallback(() => {
     setSession(null);
     setSelectedAnnotationId(null);
     setAutoFocusAnnotationId(null);
+    setSelectedPageIds([]);
   }, []);
 
   const addTextAnnotation: EditorSessionContextValue["addTextAnnotation"] =
@@ -185,18 +193,15 @@ export function EditorSessionProvider({
     setAutoFocusAnnotationId(null);
   }, []);
 
-  const initializePageOrder = useCallback(
-    (pageCount: number) => {
-      touch((current) => {
-        if (current.pageOrder.length === pageCount) {
-          return current;
-        }
-
-        return {
-          ...current,
-          pageOrder: Array.from({ length: pageCount }, (_, index) => index + 1)
-        };
-      });
+  const addSourceDocument = useCallback(
+    (document: SourceDocument) => {
+      const newPages = createPageRefs([document]);
+      touch((current) => ({
+        ...current,
+        documents: [...current.documents, document],
+        pageOrder: [...current.pageOrder, ...newPages],
+        currentPageId: current.currentPageId ?? newPages[0]?.id ?? null
+      }));
     },
     [touch]
   );
@@ -216,11 +221,57 @@ export function EditorSessionProvider({
         return {
           ...current,
           pageOrder,
-          currentPage: movedPage
+          currentPageId: movedPage.id
         };
       });
     },
     [touch]
+  );
+
+  const togglePageSelection = useCallback((pageId: string) => {
+    setSelectedPageIds((current) =>
+      current.includes(pageId)
+        ? current.filter((id) => id !== pageId)
+        : [...current, pageId]
+    );
+  }, []);
+
+  const selectAllPages = useCallback(() => {
+    setSelectedPageIds(session?.pageOrder.map((page) => page.id) ?? []);
+  }, [session?.pageOrder]);
+
+  const clearPageSelection = useCallback(() => {
+    setSelectedPageIds([]);
+  }, []);
+
+  const rotatePages = useCallback(
+    (direction: "left" | "right") => {
+      touch((current) => {
+        const targetIds =
+          selectedPageIds.length > 0
+            ? selectedPageIds
+            : current.currentPageId
+              ? [current.currentPageId]
+              : [];
+
+        if (targetIds.length === 0) {
+          return current;
+        }
+
+        return {
+          ...current,
+          pageOrder: current.pageOrder.map((page) =>
+            targetIds.includes(page.id)
+              ? {
+                  ...page,
+                  rotation: rotateValue(page.rotation, direction)
+                }
+              : page
+          )
+        };
+      });
+    },
+    [selectedPageIds, touch]
   );
 
   const setScale = useCallback(
@@ -247,22 +298,22 @@ export function EditorSessionProvider({
   );
 
   const setCurrentPage = useCallback(
-    (pageNumber: number) => {
+    (pageId: string) => {
       touch((current) => ({
         ...current,
-        currentPage: pageNumber
+        currentPageId: pageId
       }));
     },
     [touch]
   );
 
   const setPageViewport = useCallback(
-    (pageNumber: number, size: PageViewportSize) => {
+    (pageId: string, size: PageViewportSize) => {
       touch((current) => ({
         ...current,
         pageViewports: {
           ...current.pageViewports,
-          [pageNumber]: size
+          [pageId]: size
         }
       }));
     },
@@ -274,6 +325,7 @@ export function EditorSessionProvider({
       session,
       selectedAnnotationId,
       autoFocusAnnotationId,
+      selectedPageIds,
       createSession,
       clearSession,
       addTextAnnotation,
@@ -281,8 +333,12 @@ export function EditorSessionProvider({
       deleteTextAnnotation,
       selectAnnotation,
       clearAutoFocusAnnotation,
-      initializePageOrder,
+      addSourceDocument,
       reorderPages,
+      togglePageSelection,
+      selectAllPages,
+      clearPageSelection,
+      rotatePages,
       setScale,
       setCurrentPage,
       setPageViewport
@@ -291,6 +347,7 @@ export function EditorSessionProvider({
       session,
       selectedAnnotationId,
       autoFocusAnnotationId,
+      selectedPageIds,
       createSession,
       clearSession,
       addTextAnnotation,
@@ -298,8 +355,12 @@ export function EditorSessionProvider({
       deleteTextAnnotation,
       selectAnnotation,
       clearAutoFocusAnnotation,
-      initializePageOrder,
+      addSourceDocument,
       reorderPages,
+      togglePageSelection,
+      selectAllPages,
+      clearPageSelection,
+      rotatePages,
       setScale,
       setCurrentPage,
       setPageViewport
@@ -311,6 +372,25 @@ export function EditorSessionProvider({
       {children}
     </EditorSessionContext.Provider>
   );
+}
+
+function createPageRefs(documents: SourceDocument[]): PageRef[] {
+  return documents.flatMap((document) =>
+    Array.from({ length: document.pageCount }, (_, index) => ({
+      id: createId(),
+      sourceDocumentId: document.id,
+      sourcePageIndex: index,
+      rotation: 0 as PageRotation
+    }))
+  );
+}
+
+function rotateValue(
+  rotation: PageRotation,
+  direction: "left" | "right"
+): PageRotation {
+  const delta = direction === "right" ? 90 : -90;
+  return (((rotation + delta + 360) % 360) as PageRotation);
 }
 
 export function useEditorSession(): EditorSessionContextValue {

@@ -4,12 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { TextAnnotationBox } from "@/components/TextAnnotationBox";
 import { useEditorSession } from "@/context/EditorSessionContext";
-import type { EditorTool, PageViewportSize } from "@/types/editor";
+import type { EditorTool, PageRef, PageViewportSize } from "@/types/editor";
 
 type PdfPageProps = {
   activeTool: EditorTool;
   displayPageNumber: number;
-  pageNumber: number;
+  pageRef: PageRef;
   pdfDocument: PDFDocumentProxy;
   scale: number;
   onPageRef: (element: HTMLDivElement | null) => void;
@@ -19,14 +19,14 @@ type PdfPageProps = {
 export function PdfPage({
   activeTool,
   displayPageNumber,
-  pageNumber,
+  pageRef,
   pdfDocument,
   scale,
   onPageRef,
   onTextCreated
 }: PdfPageProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pageRef = useRef<HTMLDivElement | null>(null);
+  const pageContainerRef = useRef<HTMLDivElement | null>(null);
   const {
     session,
     addTextAnnotation,
@@ -43,8 +43,11 @@ export function PdfPage({
 
     async function renderPage() {
       setIsRendering(true);
-      const page = await pdfDocument.getPage(pageNumber);
-      const viewport = page.getViewport({ scale });
+      const page = await pdfDocument.getPage(pageRef.sourcePageIndex + 1);
+      const viewport = page.getViewport({
+        scale,
+        rotation: pageRef.rotation
+      });
       const canvas = canvasRef.current;
       const context = canvas?.getContext("2d");
 
@@ -63,7 +66,7 @@ export function PdfPage({
       if (!cancelled) {
         const size = { width: viewport.width, height: viewport.height };
         setPageSize(size);
-        setPageViewport(pageNumber, size);
+        setPageViewport(pageRef.id, size);
         setIsRendering(false);
       }
     }
@@ -78,25 +81,24 @@ export function PdfPage({
       cancelled = true;
       renderTask?.cancel();
     };
-  }, [pageNumber, pdfDocument, scale, setPageViewport]);
+  }, [pageRef.id, pageRef.rotation, pageRef.sourcePageIndex, pdfDocument, scale, setPageViewport]);
 
   const pageAnnotations =
-    session?.annotations.filter(
-      (annotation) => annotation.pageNumber === pageNumber
-    ) ?? [];
+    session?.annotations.filter((annotation) => annotation.pageId === pageRef.id) ??
+    [];
 
   return (
     <div
       ref={onPageRef}
-      id={`pdf-page-${pageNumber}`}
-      data-page-number={pageNumber}
+      id={`pdf-page-${pageRef.id}`}
+      data-page-id={pageRef.id}
       className="w-full scroll-mt-4"
     >
       <div className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
         Page {displayPageNumber}
       </div>
       <div
-        ref={pageRef}
+        ref={pageContainerRef}
         className="relative mx-auto bg-white shadow-lg shadow-slate-300/70 ring-1 ring-slate-200"
         style={{
           width: pageSize?.width,
@@ -108,19 +110,19 @@ export function PdfPage({
             return;
           }
 
-          if (!pageRef.current || !pageSize) {
+          if (!pageContainerRef.current || !pageSize) {
             return;
           }
 
-          const rect = pageRef.current.getBoundingClientRect();
+          const rect = pageContainerRef.current.getBoundingClientRect();
           addTextAnnotation({
-            pageNumber,
+            pageId: pageRef.id,
             x: event.clientX - rect.left,
             y: event.clientY - rect.top,
             width: 160,
             height: 48
           });
-          setCurrentPage(pageNumber);
+          setCurrentPage(pageRef.id);
           onTextCreated();
         }}
       >

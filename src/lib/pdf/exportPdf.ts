@@ -1,6 +1,6 @@
-import { PDFDocument, type PDFFont, rgb, StandardFonts } from "pdf-lib";
+import { degrees, PDFDocument, type PDFFont, rgb, StandardFonts } from "pdf-lib";
 import { stripHtml } from "@/lib/richText/html";
-import type { EditorSession, TextAnnotation, TextFontFamily } from "@/types/editor";
+import type { EditorSession, PageRef, TextAnnotation, TextFontFamily } from "@/types/editor";
 
 type TextRun = {
   text: string;
@@ -17,28 +17,39 @@ function safeFileName(fileName: string): string {
 }
 
 export async function exportEditedPdf(session: EditorSession): Promise<Blob> {
-  const sourcePdf = await PDFDocument.load(session.pdfBytes.slice(0));
   const outputPdf = await PDFDocument.create();
   const fontCache = new Map<StandardFonts, PDFFont>();
-  const sourcePages = sourcePdf.getPages();
-  const pageOrder = session.pageOrder.length
-    ? session.pageOrder
-    : sourcePages.map((_, index) => index + 1);
+  const sourcePdfCache = new Map<string, PDFDocument>();
 
-  for (const originalPageNumber of pageOrder) {
+  for (const pageRef of session.pageOrder) {
+    const sourceDocument = session.documents.find(
+      (document) => document.id === pageRef.sourceDocumentId
+    );
+
+    if (!sourceDocument) {
+      continue;
+    }
+
+    const sourcePdf =
+      sourcePdfCache.get(sourceDocument.id) ??
+      (await PDFDocument.load(sourceDocument.pdfBytes.slice(0)));
+    sourcePdfCache.set(sourceDocument.id, sourcePdf);
+
     const [copiedPage] = await outputPdf.copyPages(sourcePdf, [
-      originalPageNumber - 1
+      pageRef.sourcePageIndex
     ]);
+    copiedPage.setRotation(degrees(pageRef.rotation));
     outputPdf.addPage(copiedPage);
 
     const pageAnnotations = session.annotations.filter(
-      (annotation) => annotation.pageNumber === originalPageNumber
+      (annotation) => annotation.pageId === pageRef.id
     );
 
     for (const annotation of pageAnnotations) {
       await drawTextAnnotation(
         annotation,
         copiedPage,
+        pageRef,
         session,
         fontCache,
         outputPdf
@@ -55,11 +66,12 @@ export async function exportEditedPdf(session: EditorSession): Promise<Blob> {
 async function drawTextAnnotation(
   annotation: TextAnnotation,
   pdfPage: ReturnType<PDFDocument["getPages"]>[number],
+  pageRef: PageRef,
   session: EditorSession,
   fontCache: Map<StandardFonts, PDFFont>,
   pdfDoc: PDFDocument
 ): Promise<void> {
-  const renderedSize = session.pageViewports[annotation.pageNumber];
+  const renderedSize = session.pageViewports[annotation.pageId];
 
   if (!renderedSize) {
     return;
@@ -72,6 +84,12 @@ async function drawTextAnnotation(
   const pdfTopY = pdfPageHeight - annotation.y * scaleY;
   const pdfBottomY = pdfPageHeight - (annotation.y + annotation.height) * scaleY;
   const runScale = Math.min(scaleX, scaleY);
+
+  // Annotation coordinates are stored in the rendered browser page coordinate
+  // space. For rotated pages this MVP keeps drawing in that simple coordinate
+  // space after page rotation, which is reliable and non-crashing but not a full
+  // geometric remap of annotations around the rotated media box.
+  void pageRef;
 
   if (!annotation.backgroundTransparent) {
     const background = hexToRgb(annotation.backgroundColor);
